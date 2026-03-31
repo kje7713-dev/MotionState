@@ -5,11 +5,12 @@ from pathlib import Path
 
 import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.config import settings
 from libs.db import get_db
-from libs.models import Job, JobStatus, JobType, Video, VideoStatus
+from libs.models import Artifact, Job, JobStatus, JobType, Video, VideoStatus
 from libs.queue import enqueue
 
 router = APIRouter()
@@ -83,3 +84,33 @@ async def get_video(
         "created_at": video.created_at,
         "updated_at": video.updated_at,
     }
+
+
+@router.get("/{video_id}/artifacts")
+async def list_artifacts(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Return all artifact records for a video.
+
+    Returns a list of artifact objects, each with ``id``, ``type``,
+    ``path``, ``metadata_json``, and ``created_at``.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    result = await db.execute(select(Artifact).where(Artifact.video_id == video_id))
+    artifacts = result.scalars().all()
+
+    return [
+        {
+            "id": a.id,
+            "video_id": a.video_id,
+            "type": a.type,
+            "path": a.path,
+            "metadata_json": a.metadata_json,
+            "created_at": a.created_at,
+        }
+        for a in artifacts
+    ]

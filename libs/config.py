@@ -24,5 +24,13 @@ class Settings(BaseSettings):
     api_port: int = 8000
     debug: bool = False
 
+    # Frame extraction
+    frame_sample_fps: float = 2.0
+
+    # Detector
+    # Use "stub" for no-op detection (default) or "yolo" to enable YOLOv8.
+    detector_backend: str = "stub"
+    detector_model: str = "yolov8n.pt"
+
 
 settings = Settings()
