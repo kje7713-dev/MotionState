@@ -4,9 +4,11 @@ Steps:
 1. Mark job as running.
 2. Normalize video with FFmpeg.
 3. Extract metadata via ffprobe.
-4. Write placeholder state artifact.
-5. Create an Artifact row.
-6. Mark job + video as done.
+4. Extract frames at configured sample rate.
+5. Run CV pipeline (detector + stubs) to produce detections.
+6. Write state.json and detections.json artifacts.
+7. Create Artifact rows for both files.
+8. Mark job + video as done.
 """
 
 import json
@@ -18,8 +20,26 @@ from libs.db import AsyncSessionLocal
 from libs.models import Artifact, Job, JobStatus, Video, VideoStatus
 from libs.pipeline.run_pipeline import run_pipeline
 from libs.video.ffmpeg import normalize_video, probe_video
+from libs.video.frames import extract_frames
 
 logger = logging.getLogger(__name__)
+
+
+def _build_detector():
+    """Return a real YoloDetector when enabled by config, else StubDetector."""
+    if settings.detector_backend == "yolo":
+        try:
+            from libs.pipeline.detector_yolo import YoloDetector
+
+            return YoloDetector(model_name=settings.detector_model)
+        except ImportError:
+            logger.warning(
+                "YoloDetector requested but 'ultralytics' is not installed; "
+                "falling back to StubDetector."
+            )
+    from libs.pipeline.detector import StubDetector
+
+    return StubDetector()
 
 
 async def handle_process_video(message: dict) -> None:
@@ -56,23 +76,57 @@ async def handle_process_video(message: dict) -> None:
             meta = probe_video(str(norm_path))
             logger.info("Probe result for video %s: %s", video_id, meta)
 
-            # --- Placeholder state artifact ---
+            # --- Extract frames ---
             artifact_dir = Path(settings.artifacts_dir) / str(video_id)
             artifact_dir.mkdir(parents=True, exist_ok=True)
-            artifact_path = artifact_dir / "state.json"
-
-            state = run_pipeline(video_id)
-            artifact_path.write_text(json.dumps(state, indent=2))
-            logger.info("State artifact written to %s", artifact_path)
-
-            # --- Persist artifact row ---
-            artifact = Artifact(
-                video_id=video_id,
-                type="state",
-                path=str(artifact_path),
-                metadata_json={"version": 1},
+            frames_dir = artifact_dir / "frames"
+            frames = extract_frames(
+                norm_path,
+                frames_dir,
+                sample_fps=settings.frame_sample_fps,
             )
-            db.add(artifact)
+            logger.info("Extracted %d frames for video %s", len(frames), video_id)
+
+            # --- Run CV pipeline ---
+            detector = _build_detector()
+            state, detections = run_pipeline(
+                video_id,
+                frames=frames,
+                detector=detector,
+                sample_fps=settings.frame_sample_fps,
+            )
+
+            # --- Write state artifact ---
+            state_path = artifact_dir / "state.json"
+            state_path.write_text(json.dumps(state, indent=2))
+            logger.info("State artifact written to %s", state_path)
+
+            # --- Write detections artifact ---
+            detections_path = artifact_dir / "detections.json"
+            detections_path.write_text(json.dumps(detections, indent=2))
+            logger.info("Detections artifact written to %s", detections_path)
+
+            # --- Persist artifact rows ---
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="state",
+                    path=str(state_path),
+                    metadata_json={"version": state["version"]},
+                )
+            )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="detections",
+                    path=str(detections_path),
+                    metadata_json={
+                        "version": detections["version"],
+                        "sample_fps": settings.frame_sample_fps,
+                        "frame_count": len(frames),
+                    },
+                )
+            )
 
             # --- Update video ---
             video.normalized_path = str(norm_path)

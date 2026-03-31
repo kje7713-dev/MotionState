@@ -1,4 +1,4 @@
-# MotionState — Video Motion Pipeline (MVP Scaffold)
+# MotionState — Video Motion Pipeline
 
 > Turn video into structured human motion data.
 
@@ -7,7 +7,9 @@
 1. **Video ingest** – accepts uploaded video files via a REST API, stores them locally (S3/R2-ready interface).
 2. **Normalization** – re-encodes uploads to a consistent format/resolution using FFmpeg.
 3. **Queued processing** – enqueues a `process_video` job in Redis; a background worker picks it up.
-4. **Structured motion/state output** – the worker extracts metadata, runs (stubbed) CV pipeline stages, and writes a time-indexed JSON artifact per video.
+4. **Frame extraction** – samples frames from the normalized video at a configurable rate (default: 2 FPS) and writes JPEG files under `data/artifacts/{video_id}/frames/`.
+5. **Person detection** – runs a configurable person detector (stub by default; YOLOv8 when enabled) on each extracted frame.
+6. **Structured artifacts** – writes two time-indexed JSON artifacts per video: `state.json` (summary + pipeline output) and `detections.json` (per-frame bounding boxes).
 
 ## What is NOT in scope (yet)
 
@@ -15,7 +17,9 @@
 - No coaching logic or scoring engine
 - No real-time guarantees
 - No frontend / product UI
-- No real CV implementations (detector, tracker, pose estimator are abstract stubs)
+- No multi-object tracking
+- No pose estimation
+- No motion/state feature derivation
 
 ## Architecture
 
@@ -25,12 +29,13 @@
 └──────────┘                  │   (API)   │                  │  (Python)  │
                               └─────┬─────┘                  └─────┬──────┘
                                     │                               │
-                              Postgres (metadata)           FFmpeg + CV stubs
+                              Postgres (metadata)        FFmpeg + detector
                                     │                               │
                               ┌─────▼─────────────────────────────▼──────┐
                               │            Local filesystem               │
                               │  data/uploads/  data/normalized/          │
-                              │  data/artifacts/{video_id}/state.json     │
+                              │  data/artifacts/{video_id}/               │
+                              │    frames/  state.json  detections.json   │
                               └───────────────────────────────────────────┘
 ```
 
@@ -50,6 +55,7 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | GET | `/health` | Liveness check |
 | POST | `/videos` | Upload a video file |
 | GET | `/videos/{video_id}` | Get video status |
+| GET | `/videos/{video_id}/artifacts` | List artifact records for a video |
 | GET | `/jobs/{job_id}` | Get job status |
 
 ## Development
@@ -61,25 +67,76 @@ make lint      # ruff check
 make format    # ruff format
 ```
 
-## State artifact schema
+## Configuration
 
-Every processed video produces `data/artifacts/{video_id}/state.json`:
+Key settings (see `.env.example` for the full list):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRAME_SAMPLE_FPS` | `2.0` | Frames to extract per second of video |
+| `DETECTOR_BACKEND` | `stub` | `stub` (no-op) or `yolo` (YOLOv8) |
+| `DETECTOR_MODEL` | `yolov8n.pt` | YOLO model name or path (only when `yolo` backend) |
+
+To enable YOLOv8 detection:
+```bash
+pip install ultralytics
+DETECTOR_BACKEND=yolo make dev
+```
+
+## Artifact schemas
+
+### `state.json`
 
 ```json
 {
-  "video_id": "...",
-  "version": 1,
+  "video_id": "123",
+  "version": 2,
   "segments": [],
   "tracks": [],
   "features": [],
-  "notes": "placeholder artifact; CV pipeline not yet implemented"
+  "detections_summary": {
+    "frame_count": 120,
+    "frames_with_people": 97,
+    "total_detections": 181
+  },
+  "notes": "first real CV stage: frame extraction and person detection"
+}
+```
+
+### `detections.json`
+
+```json
+{
+  "video_id": "123",
+  "version": 1,
+  "sample_fps": 2,
+  "frames": [
+    {
+      "frame_index": 0,
+      "timestamp_ms": 0,
+      "path": "data/artifacts/123/frames/frame_000000.jpg",
+      "detections": [
+        {
+          "class_label": "person",
+          "bbox": {
+            "x": 10,
+            "y": 20,
+            "width": 100,
+            "height": 200,
+            "confidence": 0.93
+          }
+        }
+      ]
+    }
+  ]
 }
 ```
 
 ## Next steps
 
-1. Replace CV stubs with real detector/tracker/pose modules
-2. Derive motion/state features from tracks + landmarks
-3. Temporal segmentation
-4. Schema hardening for queryable state output
-5. Optional ontology layers on top
+1. Multi-object tracking (ByteTrack / DeepSORT)
+2. Pose estimation (2-D keypoints per tracked person)
+3. Motion/state feature derivation from tracks + landmarks
+4. Temporal segmentation
+5. Schema hardening for queryable state output
+6. Optional ontology layers on top
