@@ -11,7 +11,8 @@
 5. **Person detection** – runs a configurable person detector (stub by default; YOLOv8 when enabled) on each extracted frame.
 6. **Multi-frame tracking** – assigns persistent track IDs across frames using a deterministic IOU-based tracker (stub by default; IOU tracker when `TRACKER_BACKEND=iou`).
 7. **Pose estimation** – estimates 2-D body keypoints for each tracked person per frame (stub by default; MediaPipe BlazePose when `POSE_BACKEND=mediapipe`).
-8. **Structured artifacts** – writes four time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), and `poses.json` (per-frame body keypoints).
+8. **Generic motion feature derivation** – derives scalar geometric and temporal features from tracked pose data (torso angle, joint angles, widths, centroid velocity, etc.); writes `features.json`.
+9. **Structured artifacts** – writes five time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), `poses.json` (per-frame body keypoints), and `features.json` (derived motion features).
 
 ## What is NOT in scope (yet)
 
@@ -19,8 +20,7 @@
 - No coaching logic or scoring engine
 - No real-time guarantees
 - No frontend / product UI
-- No motion/state feature derivation
-- No segmentation
+- No temporal segmentation
 
 ## Architecture
 
@@ -31,15 +31,15 @@
                               └─────┬─────┘                  └─────┬──────┘
                                     │                               │
                               Postgres (metadata)     FFmpeg + detector + tracker
-                                    │                          + pose estimator
-                              ┌─────▼─────────────────────────────▼──────┐
-                              │            Local filesystem               │
-                              │  data/uploads/  data/normalized/          │
-                              │  data/artifacts/{video_id}/               │
-                              │    frames/  state.json                    │
-                              │    detections.json  tracks.json           │
-                              │    poses.json                             │
-                              └───────────────────────────────────────────┘
+                                    │                     + pose estimator
+                              ┌─────▼──────────────────+ feature deriver──────┐
+                              │            Local filesystem                    │
+                              │  data/uploads/  data/normalized/               │
+                              │  data/artifacts/{video_id}/                    │
+                              │    frames/  state.json                         │
+                              │    detections.json  tracks.json                │
+                              │    poses.json  features.json                   │
+                              └────────────────────────────────────────────────┘
 ```
 
 ## Quick start
@@ -100,11 +100,19 @@ it ships as part of the base install.
 - **Person detection artifact** – runs a configurable detector (stub by default; YOLOv8 when `vision` extras are installed and `DETECTOR_BACKEND=yolo`) and writes `detections.json`
 - **Multi-frame tracking** – assigns persistent track IDs across frames using deterministic IOU matching (`TRACKER_BACKEND=iou`); writes `tracks.json`
 - **Pose estimation** – estimates 2-D body keypoints per tracked person per frame (stub by default; MediaPipe BlazePose when `pose` extras are installed and `POSE_BACKEND=mediapipe`); writes `poses.json`
-- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, and pose summary
+- **Generic motion feature derivation** – derives domain-agnostic scalar features from tracked pose landmarks; writes `features.json`. Included features:
+  - `torso_angle` – lean of the torso relative to vertical (degrees)
+  - `shoulder_width` – pixel distance between left and right shoulders
+  - `hip_width` – pixel distance between left and right hips
+  - `left_elbow_angle` / `right_elbow_angle` – joint angle at each elbow (degrees)
+  - `left_knee_angle` / `right_knee_angle` – joint angle at each knee (degrees)
+  - `keypoint_visibility_count` – number of high-confidence body landmarks
+  - `bbox_area` – bounding-box area in pixels²
+  - `centroid_velocity` – keypoint-centroid displacement per millisecond between consecutive frames
+- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, pose summary, and feature summary
 
 ## Current limitations
 
-- **Feature derivation still stubbed** – motion/state feature derivation returns empty results
 - **Segmentation still stubbed** – temporal segmentation returns empty results
 - **Domain ontology intentionally absent** – no sport-specific labels or scoring logic
 
@@ -150,7 +158,7 @@ the worker logs a warning and falls back to the stub detector automatically — 
 ```json
 {
   "video_id": "123",
-  "version": 4,
+  "version": 5,
   "segments": [],
   "tracks": [
     {
@@ -158,7 +166,15 @@ the worker logs a warning and falls back to the stub detector automatically — 
       "detections": []
     }
   ],
-  "features": [],
+  "features": [
+    {
+      "track_id": 1,
+      "name": "torso_angle",
+      "start_ms": 5000,
+      "end_ms": 5000,
+      "value": 37.2
+    }
+  ],
   "detections_summary": {
     "frame_count": 120,
     "frames_with_people": 97,
@@ -174,7 +190,17 @@ the worker logs a warning and falls back to the stub detector automatically — 
     "posed_track_count": 2,
     "average_keypoints_per_pose": 17.0
   },
-  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation"
+  "feature_summary": {
+    "feature_count": 48,
+    "featured_track_count": 2,
+    "feature_names": [
+      "torso_angle",
+      "left_elbow_angle",
+      "right_elbow_angle",
+      "centroid_velocity"
+    ]
+  },
+  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation, feature derivation"
 }
 ```
 
@@ -257,9 +283,34 @@ the worker logs a warning and falls back to the stub detector automatically — 
 }
 ```
 
+### `features.json`
+
+```json
+{
+  "video_id": "123",
+  "version": 1,
+  "feature_count": 48,
+  "features": [
+    {
+      "track_id": 1,
+      "name": "torso_angle",
+      "start_ms": 5000,
+      "end_ms": 5000,
+      "value": 37.2
+    },
+    {
+      "track_id": 1,
+      "name": "centroid_velocity",
+      "start_ms": 5000,
+      "end_ms": 5500,
+      "value": 18.4
+    }
+  ]
+}
+```
+
 ## Next steps
 
-1. Motion/state feature derivation from tracks + landmarks
-2. Temporal segmentation
-3. Schema hardening for queryable state output
-4. Optional ontology layers on top
+1. Temporal segmentation of motion feature time-series
+2. Schema hardening for queryable state output
+3. Optional ontology layers on top
