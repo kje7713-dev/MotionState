@@ -32,5 +32,11 @@ class Settings(BaseSettings):
     detector_backend: str = "stub"
     detector_model: str = "yolov8n.pt"
 
+    # Tracker
+    # Use "stub" for no-op (default) or "iou" for deterministic IOU-based tracking.
+    tracker_backend: str = "stub"
+    tracker_iou_threshold: float = 0.3
+    tracker_max_age: int = 30
+
 
 settings = Settings()

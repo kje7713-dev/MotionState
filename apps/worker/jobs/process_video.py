@@ -5,9 +5,9 @@ Steps:
 2. Normalize video with FFmpeg.
 3. Extract metadata via ffprobe.
 4. Extract frames at configured sample rate.
-5. Run CV pipeline (detector + stubs) to produce detections.
-6. Write state.json and detections.json artifacts.
-7. Create Artifact rows for both files.
+5. Run CV pipeline (detector + tracker + stubs) to produce detections and tracks.
+6. Write state.json, detections.json, and tracks.json artifacts.
+7. Create Artifact rows for all three files.
 8. Mark job + video as done.
 """
 
@@ -40,6 +40,20 @@ def _build_detector():
     from libs.pipeline.detector import StubDetector
 
     return StubDetector()
+
+
+def _build_tracker():
+    """Return an IOUTracker when enabled by config, else StubTracker."""
+    if settings.tracker_backend == "iou":
+        from libs.pipeline.tracker_bytetrack import IOUTracker
+
+        return IOUTracker(
+            iou_threshold=settings.tracker_iou_threshold,
+            max_age=settings.tracker_max_age,
+        )
+    from libs.pipeline.tracker import StubTracker
+
+    return StubTracker()
 
 
 async def handle_process_video(message: dict) -> None:
@@ -89,10 +103,12 @@ async def handle_process_video(message: dict) -> None:
 
             # --- Run CV pipeline ---
             detector = _build_detector()
-            state, detections = run_pipeline(
+            tracker = _build_tracker()
+            state, detections, tracks = run_pipeline(
                 video_id,
                 frames=frames,
                 detector=detector,
+                tracker=tracker,
                 sample_fps=settings.frame_sample_fps,
             )
 
@@ -105,6 +121,11 @@ async def handle_process_video(message: dict) -> None:
             detections_path = artifact_dir / "detections.json"
             detections_path.write_text(json.dumps(detections, indent=2))
             logger.info("Detections artifact written to %s", detections_path)
+
+            # --- Write tracks artifact ---
+            tracks_path = artifact_dir / "tracks.json"
+            tracks_path.write_text(json.dumps(tracks, indent=2))
+            logger.info("Tracks artifact written to %s", tracks_path)
 
             # --- Persist artifact rows ---
             db.add(
@@ -124,6 +145,17 @@ async def handle_process_video(message: dict) -> None:
                         "version": detections["version"],
                         "sample_fps": settings.frame_sample_fps,
                         "frame_count": len(frames),
+                    },
+                )
+            )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="tracks",
+                    path=str(tracks_path),
+                    metadata_json={
+                        "version": tracks["version"],
+                        "track_count": tracks["track_count"],
                     },
                 )
             )
