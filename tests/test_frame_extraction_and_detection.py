@@ -95,7 +95,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
     frames = [FrameMeta(frame_index=0, timestamp_ms=0.0, path=str(frame_path))]
 
-    state, detections, _, _, _ = run_pipeline(
+    state, detections, _, _, _, _ = run_pipeline(
         video_id="test-123",
         frames=frames,
         detector=MockDetector(),
@@ -104,7 +104,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
     # State artifact checks
     assert state["video_id"] == "test-123"
-    assert state["version"] == 5
+    assert state["version"] == 6
     assert "placeholder" not in state.get("notes", "")
     summary = state["detections_summary"]
     assert summary["frame_count"] == 1
@@ -125,7 +125,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
 def test_run_pipeline_empty_frames_gives_zero_summary():
     """Pipeline with no frames returns all-zero detections summary."""
-    state, detections, _, _, _ = run_pipeline(video_id="42", frames=[], sample_fps=2.0)
+    state, detections, _, _, _, _ = run_pipeline(video_id="42", frames=[], sample_fps=2.0)
 
     assert state["detections_summary"]["frame_count"] == 0
     assert state["detections_summary"]["total_detections"] == 0
@@ -198,6 +198,7 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
                 {"video_id": "1", "version": 1, "track_count": 0, "tracks": []},
                 {"video_id": "1", "version": 1, "pose_count": 0, "poses": []},
                 {"video_id": "1", "version": 1, "feature_count": 0, "features": []},
+                {"video_id": "1", "version": 1, "segment_count": 0, "segments": []},
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -217,13 +218,13 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
 
         await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
 
-    # Five Artifact rows should have been added (state, detections, tracks, poses, features).
+    # Six Artifact rows should have been added (state, detections, tracks, poses, features, segments).
     from libs.models import Artifact
 
     artifact_rows = [o for o in added_objects if isinstance(o, Artifact)]
-    assert len(artifact_rows) == 5
+    assert len(artifact_rows) == 6
     types = {a.type for a in artifact_rows}
-    assert types == {"state", "detections", "tracks", "poses", "features"}
+    assert types == {"state", "detections", "tracks", "poses", "features", "segments"}
 
 
 # ---------------------------------------------------------------------------
@@ -339,7 +340,7 @@ def test_detections_json_shape(tmp_path):
     frame_path.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
 
     frames = [FrameMeta(frame_index=0, timestamp_ms=0.0, path=str(frame_path))]
-    _, detections, _, _, _ = run_pipeline(
+    _, detections, _, _, _, _ = run_pipeline(
         video_id="schema-test",
         frames=frames,
         detector=MockDetector(),

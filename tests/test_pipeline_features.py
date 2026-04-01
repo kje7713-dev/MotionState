@@ -96,19 +96,19 @@ def _make_frame(tmp_path: Path, idx: int) -> FrameMeta:
 
 
 # ---------------------------------------------------------------------------
-# run_pipeline returns 5-tuple
+# run_pipeline returns 6-tuple
 # ---------------------------------------------------------------------------
 
 
 class TestPipelineReturnsTuple:
-    def test_run_pipeline_returns_five_tuple(self, tmp_path):
+    def test_run_pipeline_returns_six_tuple(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
         result = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
-        assert len(result) == 5, "run_pipeline must return a 5-tuple"
+        assert len(result) == 6, "run_pipeline must return a 6-tuple"
 
-    def test_run_pipeline_empty_frames_returns_five_tuple(self):
+    def test_run_pipeline_empty_frames_returns_six_tuple(self):
         result = run_pipeline("v", frames=[], sample_fps=2.0)
-        assert len(result) == 5
+        assert len(result) == 6
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +119,7 @@ class TestPipelineReturnsTuple:
 class TestFeaturesArtifact:
     def test_features_artifact_has_required_top_level_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -132,7 +132,7 @@ class TestFeaturesArtifact:
 
     def test_features_artifact_video_id(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "vid-42",
             frames=[frame],
             detector=_OnePerson(),
@@ -144,7 +144,7 @@ class TestFeaturesArtifact:
 
     def test_features_artifact_version_is_one(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -156,7 +156,7 @@ class TestFeaturesArtifact:
 
     def test_features_artifact_feature_count_matches_list(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -168,7 +168,7 @@ class TestFeaturesArtifact:
 
     def test_full_body_pose_produces_non_empty_features(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -181,7 +181,7 @@ class TestFeaturesArtifact:
 
     def test_feature_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -195,7 +195,7 @@ class TestFeaturesArtifact:
 
     def test_stub_pose_gives_empty_features(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -207,13 +207,13 @@ class TestFeaturesArtifact:
         assert feat["features"] == []
 
     def test_empty_frames_gives_empty_features(self):
-        _, _, _, _, feat = run_pipeline("v", frames=[], sample_fps=2.0)
+        _, _, _, _, feat, _ = run_pipeline("v", frames=[], sample_fps=2.0)
         assert feat["feature_count"] == 0
         assert feat["features"] == []
 
     def test_features_artifact_is_json_serialisable(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -227,7 +227,7 @@ class TestFeaturesArtifact:
 
     def test_mock_deriver_result_appears_in_artifact(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -245,23 +245,23 @@ class TestFeaturesArtifact:
 
 
 class TestStateFeatureSummary:
-    def test_state_version_is_five(self, tmp_path):
+    def test_state_version_is_six(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
-        assert state["version"] == 5
+        assert state["version"] == 6
 
     def test_state_has_feature_summary_key(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "feature_summary" in state
 
     def test_feature_summary_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         fs = state["feature_summary"]
@@ -270,7 +270,7 @@ class TestStateFeatureSummary:
 
     def test_feature_summary_counts_match_with_mock_deriver(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -284,7 +284,7 @@ class TestStateFeatureSummary:
 
     def test_feature_summary_empty_with_stub_pose(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -299,7 +299,7 @@ class TestStateFeatureSummary:
 
     def test_feature_summary_non_empty_with_full_body_pose(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -314,21 +314,21 @@ class TestStateFeatureSummary:
 
     def test_state_notes_mention_feature_derivation(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "feature derivation" in state["notes"]
 
     def test_state_notes_still_mention_pose_estimation(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "pose estimation" in state["notes"]
 
     def test_state_notes_still_mention_tracking(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _ = run_pipeline(
+        state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "tracking" in state["notes"]
@@ -343,7 +343,7 @@ class TestTimestampPropagation:
     def test_pose_timestamp_ms_is_populated(self, tmp_path):
         """Poses must carry their frame's timestamp_ms so feature deriver can use it."""
         frame = _make_frame(tmp_path, 4)  # timestamp_ms = 4 * 500 = 2000
-        _, _, _, _, feat = run_pipeline(
+        _, _, _, _, feat, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),

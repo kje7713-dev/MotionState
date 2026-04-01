@@ -5,10 +5,11 @@ Steps:
 2. Normalize video with FFmpeg.
 3. Extract metadata via ffprobe.
 4. Extract frames at configured sample rate.
-5. Run CV pipeline (detector + tracker + pose estimator + feature deriver + stubs) to produce
-   detections, tracks, pose estimates, and motion features.
-6. Write state.json, detections.json, tracks.json, poses.json, and features.json artifacts.
-7. Create Artifact rows for all five files.
+5. Run CV pipeline (detector + tracker + pose estimator + feature deriver + segmenter) to produce
+   detections, tracks, pose estimates, motion features, and temporal segments.
+6. Write state.json, detections.json, tracks.json, poses.json, features.json, and
+   segments.json artifacts.
+7. Create Artifact rows for all six files.
 8. Mark job + video as done.
 """
 
@@ -123,7 +124,7 @@ async def handle_process_video(message: dict) -> None:
             detector = _build_detector()
             tracker = _build_tracker()
             pose_estimator = _build_pose_estimator()
-            state, detections, tracks, poses, features = run_pipeline(
+            state, detections, tracks, poses, features, segments = run_pipeline(
                 video_id,
                 frames=frames,
                 detector=detector,
@@ -156,6 +157,11 @@ async def handle_process_video(message: dict) -> None:
             features_path = artifact_dir / "features.json"
             features_path.write_text(json.dumps(features, indent=2))
             logger.info("Features artifact written to %s", features_path)
+
+            # --- Write segments artifact ---
+            segments_path = artifact_dir / "segments.json"
+            segments_path.write_text(json.dumps(segments, indent=2))
+            logger.info("Segments artifact written to %s", segments_path)
 
             # --- Persist artifact rows ---
             db.add(
@@ -208,6 +214,17 @@ async def handle_process_video(message: dict) -> None:
                     metadata_json={
                         "version": features["version"],
                         "feature_count": features["feature_count"],
+                    },
+                )
+            )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="segments",
+                    path=str(segments_path),
+                    metadata_json={
+                        "version": segments["version"],
+                        "segment_count": segments["segment_count"],
                     },
                 )
             )
