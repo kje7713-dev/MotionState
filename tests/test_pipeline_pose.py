@@ -69,7 +69,7 @@ def _make_frame(tmp_path: Path, idx: int) -> FrameMeta:
 class TestPosesArtifact:
     def test_poses_artifact_has_required_top_level_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -82,7 +82,7 @@ class TestPosesArtifact:
 
     def test_poses_artifact_video_id(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "vid-99",
             frames=[frame],
             detector=_OnePerson(),
@@ -94,7 +94,7 @@ class TestPosesArtifact:
 
     def test_poses_artifact_version_is_one(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -106,7 +106,7 @@ class TestPosesArtifact:
 
     def test_one_person_one_frame_produces_one_pose(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -119,7 +119,7 @@ class TestPosesArtifact:
 
     def test_one_person_three_frames_produces_three_poses(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -132,7 +132,7 @@ class TestPosesArtifact:
 
     def test_pose_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -146,7 +146,7 @@ class TestPosesArtifact:
 
     def test_pose_entry_keypoint_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -160,7 +160,7 @@ class TestPosesArtifact:
 
     def test_pose_timestamp_ms_matches_frame_meta(self, tmp_path):
         frame = _make_frame(tmp_path, 4)  # timestamp_ms = 4 * 500 = 2000
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -172,7 +172,7 @@ class TestPosesArtifact:
 
     def test_stub_pose_estimator_gives_empty_poses(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -184,13 +184,13 @@ class TestPosesArtifact:
         assert poses["poses"] == []
 
     def test_empty_frames_gives_empty_poses(self):
-        _, _, _, poses = run_pipeline("v", frames=[], sample_fps=2.0)
+        _, _, _, poses, _ = run_pipeline("v", frames=[], sample_fps=2.0)
         assert poses["pose_count"] == 0
         assert poses["poses"] == []
 
     def test_poses_artifact_is_json_serialisable(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=[frame],
             detector=_OnePerson(),
@@ -211,21 +211,21 @@ class TestPosesArtifact:
 class TestStatePoseSummary:
     def test_state_version_is_four(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
-        assert state["version"] == 4
+        assert state["version"] == 5
 
     def test_state_has_pose_summary_key(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "pose_summary" in state
 
     def test_pose_summary_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         ps = state["pose_summary"]
@@ -234,7 +234,7 @@ class TestStatePoseSummary:
 
     def test_pose_summary_with_mock_estimator(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -249,7 +249,7 @@ class TestStatePoseSummary:
 
     def test_pose_summary_with_stub_estimator_is_zero(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -264,14 +264,14 @@ class TestStatePoseSummary:
 
     def test_state_notes_mention_pose_estimation(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "pose estimation" in state["notes"]
 
     def test_state_notes_still_mention_tracking(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _ = run_pipeline(
+        state, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
         assert "tracking" in state["notes"]
@@ -285,7 +285,7 @@ class TestStatePoseSummary:
 class TestPipelineReturnsNonEmptyPoses:
     def test_mock_estimator_produces_poses_with_keypoints(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, _, poses = run_pipeline(
+        _, _, _, poses, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),
@@ -298,7 +298,7 @@ class TestPipelineReturnsNonEmptyPoses:
 
     def test_pose_track_id_matches_tracker_output(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, tracks, poses = run_pipeline(
+        _, _, tracks, poses, _ = run_pipeline(
             "v",
             frames=frames,
             detector=_OnePerson(),

@@ -5,10 +5,10 @@ Steps:
 2. Normalize video with FFmpeg.
 3. Extract metadata via ffprobe.
 4. Extract frames at configured sample rate.
-5. Run CV pipeline (detector + tracker + pose estimator + stubs) to produce
-   detections, tracks, and pose estimates.
-6. Write state.json, detections.json, tracks.json, and poses.json artifacts.
-7. Create Artifact rows for all four files.
+5. Run CV pipeline (detector + tracker + pose estimator + feature deriver + stubs) to produce
+   detections, tracks, pose estimates, and motion features.
+6. Write state.json, detections.json, tracks.json, poses.json, and features.json artifacts.
+7. Create Artifact rows for all five files.
 8. Mark job + video as done.
 """
 
@@ -123,7 +123,7 @@ async def handle_process_video(message: dict) -> None:
             detector = _build_detector()
             tracker = _build_tracker()
             pose_estimator = _build_pose_estimator()
-            state, detections, tracks, poses = run_pipeline(
+            state, detections, tracks, poses, features = run_pipeline(
                 video_id,
                 frames=frames,
                 detector=detector,
@@ -151,6 +151,11 @@ async def handle_process_video(message: dict) -> None:
             poses_path = artifact_dir / "poses.json"
             poses_path.write_text(json.dumps(poses, indent=2))
             logger.info("Poses artifact written to %s", poses_path)
+
+            # --- Write features artifact ---
+            features_path = artifact_dir / "features.json"
+            features_path.write_text(json.dumps(features, indent=2))
+            logger.info("Features artifact written to %s", features_path)
 
             # --- Persist artifact rows ---
             db.add(
@@ -192,6 +197,17 @@ async def handle_process_video(message: dict) -> None:
                     metadata_json={
                         "version": poses["version"],
                         "pose_count": poses["pose_count"],
+                    },
+                )
+            )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="features",
+                    path=str(features_path),
+                    metadata_json={
+                        "version": features["version"],
+                        "feature_count": features["feature_count"],
                     },
                 )
             )

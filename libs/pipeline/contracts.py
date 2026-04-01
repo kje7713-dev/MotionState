@@ -41,6 +41,7 @@ class Detection:
     bbox: BoundingBox
     class_id: int = 0
     class_label: str = "person"
+    timestamp_ms: float = 0.0
 
 
 @dataclass
@@ -68,6 +69,7 @@ class PoseEstimate:
     frame_index: int
     track_id: int
     keypoints: list[Keypoint] = field(default_factory=list)
+    timestamp_ms: float = 0.0
 
 
 @dataclass

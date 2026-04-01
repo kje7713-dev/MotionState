@@ -10,7 +10,7 @@ from libs.models import Artifact, JobStatus, VideoStatus
 def _make_fake_state(video_id: str = "1") -> dict:
     return {
         "video_id": video_id,
-        "version": 4,
+        "version": 5,
         "segments": [],
         "tracks": [],
         "features": [],
@@ -25,9 +25,24 @@ def _make_fake_state(video_id: str = "1") -> dict:
             "posed_track_count": 0,
             "average_keypoints_per_pose": 0.0,
         },
+        "feature_summary": {
+            "feature_count": 0,
+            "featured_track_count": 0,
+            "feature_names": [],
+        },
         "notes": (
-            "first real CV stages: frame extraction, person detection, tracking, pose estimation"
+            "first real CV stages: frame extraction, person detection, tracking, "
+            "pose estimation, feature derivation"
         ),
+    }
+
+
+def _make_fake_features(video_id: str = "1") -> dict:
+    return {
+        "video_id": video_id,
+        "version": 1,
+        "feature_count": 0,
+        "features": [],
     }
 
 
@@ -123,7 +138,10 @@ async def test_state_json_is_written(tmp_path):
         patch("apps.worker.jobs.process_video.extract_frames", return_value=[]),
         patch(
             "apps.worker.jobs.process_video.run_pipeline",
-            return_value=(fake_state, fake_detections, fake_tracks, _make_fake_poses()),
+            return_value=(
+                fake_state, fake_detections, fake_tracks,
+                _make_fake_poses(), _make_fake_features(),
+            ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
     ):
@@ -154,7 +172,10 @@ async def test_detections_json_is_written(tmp_path):
         patch("apps.worker.jobs.process_video.extract_frames", return_value=[]),
         patch(
             "apps.worker.jobs.process_video.run_pipeline",
-            return_value=(fake_state, fake_detections, fake_tracks, _make_fake_poses()),
+            return_value=(
+                fake_state, fake_detections, fake_tracks,
+                _make_fake_poses(), _make_fake_features(),
+            ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
     ):
@@ -187,6 +208,7 @@ async def test_tracks_json_is_written(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -220,6 +242,7 @@ async def test_poses_json_is_written(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -233,6 +256,40 @@ async def test_poses_json_is_written(tmp_path):
     assert poses_path.exists(), "poses.json was not written"
 
 
+@pytest.mark.asyncio
+async def test_features_json_is_written(tmp_path):
+    """handle_process_video writes features.json to the artifacts directory."""
+    mock_db, _, _, _ = _make_mock_db(tmp_path)
+
+    with (
+        patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
+        patch("apps.worker.jobs.process_video.normalize_video"),
+        patch(
+            "apps.worker.jobs.process_video.probe_video",
+            return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
+        ),
+        patch("apps.worker.jobs.process_video.extract_frames", return_value=[]),
+        patch(
+            "apps.worker.jobs.process_video.run_pipeline",
+            return_value=(
+                _make_fake_state(),
+                _make_fake_detections(),
+                _make_fake_tracks(),
+                _make_fake_poses(),
+                _make_fake_features(),
+            ),
+        ),
+        patch("apps.worker.jobs.process_video.settings") as mock_settings,
+    ):
+        _patch_settings(mock_settings, tmp_path)
+        from apps.worker.jobs.process_video import handle_process_video
+
+        await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
+
+    features_path = tmp_path / "artifacts" / "1" / "features.json"
+    assert features_path.exists(), "features.json was not written"
+
+
 # ---------------------------------------------------------------------------
 # Artifact rows persisted
 # ---------------------------------------------------------------------------
@@ -240,7 +297,7 @@ async def test_poses_json_is_written(tmp_path):
 
 @pytest.mark.asyncio
 async def test_three_artifact_rows_are_added(tmp_path):
-    """State, detections, tracks, and poses Artifact rows are all persisted."""
+    """State, detections, tracks, poses, and features Artifact rows are all persisted."""
     mock_db, _, _, added_objects = _make_mock_db(tmp_path)
 
     with (
@@ -258,6 +315,7 @@ async def test_three_artifact_rows_are_added(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -268,12 +326,12 @@ async def test_three_artifact_rows_are_added(tmp_path):
         await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
 
     artifact_rows = [o for o in added_objects if isinstance(o, Artifact)]
-    assert len(artifact_rows) == 4
+    assert len(artifact_rows) == 5
 
 
 @pytest.mark.asyncio
 async def test_artifact_types_include_tracks(tmp_path):
-    """The persisted Artifact rows include types 'state', 'detections', 'tracks', and 'poses'."""
+    """Persisted Artifact rows include 'state', 'detections', 'tracks', 'poses', 'features'."""
     mock_db, _, _, added_objects = _make_mock_db(tmp_path)
 
     with (
@@ -291,6 +349,7 @@ async def test_artifact_types_include_tracks(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -301,7 +360,7 @@ async def test_artifact_types_include_tracks(tmp_path):
         await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
 
     artifact_types = {o.type for o in added_objects if isinstance(o, Artifact)}
-    assert artifact_types == {"state", "detections", "tracks", "poses"}
+    assert artifact_types == {"state", "detections", "tracks", "poses", "features"}
 
 
 # ---------------------------------------------------------------------------
@@ -328,6 +387,7 @@ async def test_job_status_transitions_to_done_on_success(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -359,6 +419,7 @@ async def test_video_status_transitions_to_ready_on_success(tmp_path):
                 _make_fake_detections(),
                 _make_fake_tracks(),
                 _make_fake_poses(),
+                _make_fake_features(),
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
