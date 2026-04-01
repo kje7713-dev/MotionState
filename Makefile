@@ -1,4 +1,4 @@
-.PHONY: dev test lint format down
+.PHONY: dev test lint format down smoke
 
 dev:
 	docker compose up --build
@@ -9,6 +9,10 @@ down:
 test:
 	pip install -e ".[dev]" -q
 	pytest tests/ -v
+
+smoke:
+	pip install -e ".[dev]" -q
+	pytest tests/ -v -m smoke
 
 lint:
 	ruff check .

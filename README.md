@@ -88,7 +88,44 @@ pip install -e ".[dev,pose]"
 make test      # run pytest
 make lint      # ruff check
 make format    # ruff format
+make smoke     # run only smoke tests (requires ffmpeg)
 ```
+
+## Smoke test
+
+The smoke test proves that the full pipeline still works as a connected system
+after any change.  It runs a real video through every stage using stub CV
+backends (no heavy optional dependencies) and validates that all expected
+artifacts are produced.
+
+**What the smoke test proves:**
+
+- A small fixture video can be successfully normalized and decoded by FFmpeg
+- Frames are extracted and passed through the CV pipeline (stub backends)
+- All expected artifact files are written:
+  `state.json`, `detections.json`, `tracks.json`, `poses.json`,
+  `features.json`, `segments.json`, `timeline_manifest.json`, `clips/`
+- `state.json` contains the expected top-level summary keys
+- `timeline_manifest.json` contains the expected top-level keys
+- Artifact rows are created for all artifact types
+- The `GET /videos/{id}/state` and `GET /videos/{id}/timeline` API endpoints
+  return correct responses against actually generated artifact files
+
+**What the smoke test does NOT prove:**
+
+- CV model quality or detection accuracy (stub backends return empty results)
+- Production backend behaviour (YOLOv8, MediaPipe, ByteTrack)
+- Domain-specific motion correctness
+
+Run the smoke test locally (requires `ffmpeg`):
+
+```bash
+make smoke
+```
+
+The CI `smoke-test` job runs the same path automatically on every push.  It
+installs `ffmpeg` via `apt` and runs `pytest -m smoke` against the committed
+fixture video at `tests/fixtures/fixture.mp4`.
 
 ## Install modes
 

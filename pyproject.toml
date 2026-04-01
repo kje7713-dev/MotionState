@@ -47,6 +47,9 @@ include = ["apps*", "libs*"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = [
+    "smoke: end-to-end smoke tests that require ffmpeg and exercise the full pipeline",
+]
 
 [tool.ruff]
 line-length = 100
