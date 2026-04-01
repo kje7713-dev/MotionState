@@ -38,5 +38,11 @@ class Settings(BaseSettings):
     tracker_iou_threshold: float = 0.3
     tracker_max_age: int = 30
 
+    # Pose estimator
+    # Use "stub" for no-op (default) or "mediapipe" for MediaPipe BlazePose.
+    pose_backend: str = "stub"
+    pose_model: str = ""
+    pose_min_confidence: float = 0.3
+
 
 settings = Settings()

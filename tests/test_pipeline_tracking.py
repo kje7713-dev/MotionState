@@ -65,7 +65,7 @@ def _make_frame(tmp_path: Path, idx: int) -> FrameMeta:
 class TestTracksArtifact:
     def test_tracks_artifact_has_required_top_level_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         for key in ("video_id", "version", "track_count", "tracks"):
@@ -73,21 +73,21 @@ class TestTracksArtifact:
 
     def test_tracks_artifact_video_id(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "vid-42", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["video_id"] == "vid-42"
 
     def test_tracks_artifact_version_is_one(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["version"] == 1
 
     def test_one_person_produces_one_track(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] == 1
@@ -95,7 +95,7 @@ class TestTracksArtifact:
 
     def test_two_people_produce_two_tracks(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_TwoPeople(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] == 2
@@ -103,7 +103,7 @@ class TestTracksArtifact:
 
     def test_track_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         entry = tracks["tracks"][0]
@@ -112,7 +112,7 @@ class TestTracksArtifact:
 
     def test_detection_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         det = tracks["tracks"][0]["detections"][0]
@@ -121,7 +121,7 @@ class TestTracksArtifact:
 
     def test_bbox_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         bbox = tracks["tracks"][0]["detections"][0]["bbox"]
@@ -130,14 +130,14 @@ class TestTracksArtifact:
 
     def test_timestamp_ms_matches_frame_meta(self, tmp_path):
         frame = _make_frame(tmp_path, 3)  # timestamp_ms = 3 * 500 = 1500
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["tracks"][0]["detections"][0]["timestamp_ms"] == pytest.approx(1500.0)
 
     def test_tracks_artifact_is_json_serialisable(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         dumped = json.dumps(tracks)
@@ -145,13 +145,13 @@ class TestTracksArtifact:
         assert parsed["video_id"] == "v"
 
     def test_empty_frames_gives_empty_tracks(self):
-        _, _, tracks = run_pipeline("v", frames=[], tracker=IOUTracker(), sample_fps=2.0)
+        _, _, tracks, _ = run_pipeline("v", frames=[], tracker=IOUTracker(), sample_fps=2.0)
         assert tracks["track_count"] == 0
         assert tracks["tracks"] == []
 
     def test_stub_tracker_gives_empty_tracks(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=StubTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] == 0
@@ -166,7 +166,7 @@ class TestTracksArtifact:
 class TestPersistentTrackIDs:
     def test_one_person_three_frames_one_track_three_detections(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] == 1
@@ -174,7 +174,7 @@ class TestPersistentTrackIDs:
 
     def test_two_people_each_track_has_correct_detection_count(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_TwoPeople(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] == 2
@@ -183,7 +183,7 @@ class TestPersistentTrackIDs:
 
     def test_track_ids_are_unique(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_TwoPeople(), tracker=IOUTracker(), sample_fps=2.0
         )
         ids = [t["track_id"] for t in tracks["tracks"]]
@@ -196,26 +196,26 @@ class TestPersistentTrackIDs:
 
 
 class TestStateSummaryTracking:
-    def test_state_version_is_three(self, tmp_path):
+    def test_state_version_is_four(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
-        assert state["version"] == 3
+        state, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        assert state["version"] == 4
 
     def test_state_has_tracking_summary_key(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
         assert "tracking_summary" in state
 
     def test_tracking_summary_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
         ts = state["tracking_summary"]
         for key in ("track_count", "tracked_frame_count", "average_detections_per_frame"):
             assert key in ts, f"tracking_summary missing key: {key}"
 
     def test_tracking_summary_with_iou_tracker_one_person(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _ = run_pipeline(
+        state, _, _, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         ts = state["tracking_summary"]
@@ -225,7 +225,7 @@ class TestStateSummaryTracking:
 
     def test_tracking_summary_with_stub_tracker_is_zero(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _ = run_pipeline(
+        state, _, _, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=StubTracker(), sample_fps=2.0
         )
         ts = state["tracking_summary"]
@@ -235,12 +235,12 @@ class TestStateSummaryTracking:
 
     def test_state_notes_mention_tracking(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
         assert "tracking" in state["notes"]
 
     def test_state_tracks_field_matches_tracks_artifact(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        state, _, tracks = run_pipeline(
+        state, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert state["tracks"] == tracks["tracks"]
@@ -254,7 +254,7 @@ class TestStateSummaryTracking:
 class TestPipelineReturnsNonEmptyTracks:
     def test_iou_tracker_produces_tracks_with_detections(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        _, _, tracks = run_pipeline(
+        _, _, tracks, _ = run_pipeline(
             "v", frames=frames, detector=_OnePerson(), tracker=IOUTracker(), sample_fps=2.0
         )
         assert tracks["track_count"] > 0
