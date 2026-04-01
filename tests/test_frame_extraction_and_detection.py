@@ -95,7 +95,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
     frames = [FrameMeta(frame_index=0, timestamp_ms=0.0, path=str(frame_path))]
 
-    state, detections, _ = run_pipeline(
+    state, detections, _, _ = run_pipeline(
         video_id="test-123",
         frames=frames,
         detector=MockDetector(),
@@ -104,7 +104,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
     # State artifact checks
     assert state["video_id"] == "test-123"
-    assert state["version"] == 3
+    assert state["version"] == 4
     assert "placeholder" not in state.get("notes", "")
     summary = state["detections_summary"]
     assert summary["frame_count"] == 1
@@ -125,7 +125,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
 def test_run_pipeline_empty_frames_gives_zero_summary():
     """Pipeline with no frames returns all-zero detections summary."""
-    state, detections, _ = run_pipeline(video_id="42", frames=[], sample_fps=2.0)
+    state, detections, _, _ = run_pipeline(video_id="42", frames=[], sample_fps=2.0)
 
     assert state["detections_summary"]["frame_count"] == 0
     assert state["detections_summary"]["total_detections"] == 0
@@ -196,6 +196,7 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
                 fake_state,
                 fake_detections,
                 {"video_id": "1", "version": 1, "track_count": 0, "tracks": []},
+                {"video_id": "1", "version": 1, "pose_count": 0, "poses": []},
             ),
         ),
         patch("apps.worker.jobs.process_video.settings") as mock_settings,
@@ -208,18 +209,20 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
         mock_settings.tracker_backend = "stub"
         mock_settings.tracker_iou_threshold = 0.3
         mock_settings.tracker_max_age = 30
+        mock_settings.pose_backend = "stub"
+        mock_settings.pose_min_confidence = 0.3
 
         from apps.worker.jobs.process_video import handle_process_video
 
         await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
 
-    # Three Artifact rows should have been added (state, detections, tracks).
+    # Four Artifact rows should have been added (state, detections, tracks, poses).
     from libs.models import Artifact
 
     artifact_rows = [o for o in added_objects if isinstance(o, Artifact)]
-    assert len(artifact_rows) == 3
+    assert len(artifact_rows) == 4
     types = {a.type for a in artifact_rows}
-    assert types == {"state", "detections", "tracks"}
+    assert types == {"state", "detections", "tracks", "poses"}
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +338,7 @@ def test_detections_json_shape(tmp_path):
     frame_path.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
 
     frames = [FrameMeta(frame_index=0, timestamp_ms=0.0, path=str(frame_path))]
-    _, detections, _ = run_pipeline(
+    _, detections, _, _ = run_pipeline(
         video_id="schema-test",
         frames=frames,
         detector=MockDetector(),

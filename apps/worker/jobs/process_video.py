@@ -5,9 +5,10 @@ Steps:
 2. Normalize video with FFmpeg.
 3. Extract metadata via ffprobe.
 4. Extract frames at configured sample rate.
-5. Run CV pipeline (detector + tracker + stubs) to produce detections and tracks.
-6. Write state.json, detections.json, and tracks.json artifacts.
-7. Create Artifact rows for all three files.
+5. Run CV pipeline (detector + tracker + pose estimator + stubs) to produce
+   detections, tracks, and pose estimates.
+6. Write state.json, detections.json, tracks.json, and poses.json artifacts.
+7. Create Artifact rows for all four files.
 8. Mark job + video as done.
 """
 
@@ -54,6 +55,23 @@ def _build_tracker():
     from libs.pipeline.tracker import StubTracker
 
     return StubTracker()
+
+
+def _build_pose_estimator():
+    """Return a MediaPipePoseEstimator when enabled by config, else StubPoseEstimator."""
+    if settings.pose_backend == "mediapipe":
+        try:
+            from libs.pipeline.pose_mediapipe import MediaPipePoseEstimator
+
+            return MediaPipePoseEstimator(min_confidence=settings.pose_min_confidence)
+        except ImportError:
+            logger.warning(
+                "MediaPipePoseEstimator requested but 'mediapipe' is not installed; "
+                "falling back to StubPoseEstimator."
+            )
+    from libs.pipeline.pose import StubPoseEstimator
+
+    return StubPoseEstimator()
 
 
 async def handle_process_video(message: dict) -> None:
@@ -104,11 +122,13 @@ async def handle_process_video(message: dict) -> None:
             # --- Run CV pipeline ---
             detector = _build_detector()
             tracker = _build_tracker()
-            state, detections, tracks = run_pipeline(
+            pose_estimator = _build_pose_estimator()
+            state, detections, tracks, poses = run_pipeline(
                 video_id,
                 frames=frames,
                 detector=detector,
                 tracker=tracker,
+                pose_estimator=pose_estimator,
                 sample_fps=settings.frame_sample_fps,
             )
 
@@ -126,6 +146,11 @@ async def handle_process_video(message: dict) -> None:
             tracks_path = artifact_dir / "tracks.json"
             tracks_path.write_text(json.dumps(tracks, indent=2))
             logger.info("Tracks artifact written to %s", tracks_path)
+
+            # --- Write poses artifact ---
+            poses_path = artifact_dir / "poses.json"
+            poses_path.write_text(json.dumps(poses, indent=2))
+            logger.info("Poses artifact written to %s", poses_path)
 
             # --- Persist artifact rows ---
             db.add(
@@ -156,6 +181,17 @@ async def handle_process_video(message: dict) -> None:
                     metadata_json={
                         "version": tracks["version"],
                         "track_count": tracks["track_count"],
+                    },
+                )
+            )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="poses",
+                    path=str(poses_path),
+                    metadata_json={
+                        "version": poses["version"],
+                        "pose_count": poses["pose_count"],
                     },
                 )
             )

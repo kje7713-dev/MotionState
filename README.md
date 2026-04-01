@@ -10,7 +10,8 @@
 4. **Frame extraction** – samples frames from the normalized video at a configurable rate (default: 2 FPS) and writes JPEG files under `data/artifacts/{video_id}/frames/`.
 5. **Person detection** – runs a configurable person detector (stub by default; YOLOv8 when enabled) on each extracted frame.
 6. **Multi-frame tracking** – assigns persistent track IDs across frames using a deterministic IOU-based tracker (stub by default; IOU tracker when `TRACKER_BACKEND=iou`).
-7. **Structured artifacts** – writes three time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), and `tracks.json` (persistent track histories).
+7. **Pose estimation** – estimates 2-D body keypoints for each tracked person per frame (stub by default; MediaPipe BlazePose when `POSE_BACKEND=mediapipe`).
+8. **Structured artifacts** – writes four time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), and `poses.json` (per-frame body keypoints).
 
 ## What is NOT in scope (yet)
 
@@ -18,7 +19,6 @@
 - No coaching logic or scoring engine
 - No real-time guarantees
 - No frontend / product UI
-- No pose estimation
 - No motion/state feature derivation
 - No segmentation
 
@@ -31,13 +31,14 @@
                               └─────┬─────┘                  └─────┬──────┘
                                     │                               │
                               Postgres (metadata)     FFmpeg + detector + tracker
-                                    │                               │
+                                    │                          + pose estimator
                               ┌─────▼─────────────────────────────▼──────┐
                               │            Local filesystem               │
                               │  data/uploads/  data/normalized/          │
                               │  data/artifacts/{video_id}/               │
                               │    frames/  state.json                    │
                               │    detections.json  tracks.json           │
+                              │    poses.json                             │
                               └───────────────────────────────────────────┘
 ```
 
@@ -69,6 +70,9 @@ pip install -e ".[dev]"
 # Full install with vision extras (enables YOLOv8 detector path)
 pip install -e ".[dev,vision]"
 
+# Full install with pose extras (enables MediaPipe pose estimator path)
+pip install -e ".[dev,pose]"
+
 make test      # run pytest
 make lint      # ruff check
 make format    # ruff format
@@ -78,11 +82,13 @@ make format    # ruff format
 
 | Mode | Command | When to use |
 |------|---------|-------------|
-| Base (default) | `pip install -e .` | API, worker with stub detector/tracker, tests — no heavy deps |
+| Base (default) | `pip install -e .` | API, worker with stub detector/tracker/pose, tests — no heavy deps |
 | Vision extras | `pip install -e ".[vision]"` | Enable the real YOLOv8 detector path |
+| Pose extras | `pip install -e ".[pose]"` | Enable the real MediaPipe pose estimation path |
 
 The default install works without any CV packages.  Only install the `vision`
-extras if you intend to run `DETECTOR_BACKEND=yolo`.
+extras if you intend to run `DETECTOR_BACKEND=yolo`, and the `pose` extras if
+you intend to run `POSE_BACKEND=mediapipe`.
 
 The IOU tracker (`TRACKER_BACKEND=iou`) requires no additional dependencies —
 it ships as part of the base install.
@@ -93,11 +99,11 @@ it ships as part of the base install.
 - **Frame extraction** – samples JPEG frames at a configurable rate (default: 2 FPS)
 - **Person detection artifact** – runs a configurable detector (stub by default; YOLOv8 when `vision` extras are installed and `DETECTOR_BACKEND=yolo`) and writes `detections.json`
 - **Multi-frame tracking** – assigns persistent track IDs across frames using deterministic IOU matching (`TRACKER_BACKEND=iou`); writes `tracks.json`
-- **State artifact** – writes `state.json` with per-video detection summary counts and tracking summary
+- **Pose estimation** – estimates 2-D body keypoints per tracked person per frame (stub by default; MediaPipe BlazePose when `pose` extras are installed and `POSE_BACKEND=mediapipe`); writes `poses.json`
+- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, and pose summary
 
 ## Current limitations
 
-- **Pose estimation not implemented** – no 2-D keypoint extraction
 - **Feature derivation still stubbed** – motion/state feature derivation returns empty results
 - **Segmentation still stubbed** – temporal segmentation returns empty results
 - **Domain ontology intentionally absent** – no sport-specific labels or scoring logic
@@ -114,6 +120,8 @@ Key settings (see `.env.example` for the full list):
 | `TRACKER_BACKEND` | `stub` | `stub` (no-op) or `iou` (deterministic IOU tracker) |
 | `TRACKER_IOU_THRESHOLD` | `0.3` | Minimum IOU to associate a detection with an existing track |
 | `TRACKER_MAX_AGE` | `30` | Frames a track can go undetected before being dropped |
+| `POSE_BACKEND` | `stub` | `stub` (no-op) or `mediapipe` (MediaPipe BlazePose) |
+| `POSE_MIN_CONFIDENCE` | `0.3` | Minimum landmark visibility score to include a keypoint |
 
 To enable YOLOv8 detection:
 ```bash
@@ -126,6 +134,12 @@ To enable IOU-based tracking (no extra dependencies needed):
 TRACKER_BACKEND=iou make dev
 ```
 
+To enable MediaPipe pose estimation:
+```bash
+pip install -e ".[pose]"   # or: pip install mediapipe pillow numpy
+POSE_BACKEND=mediapipe make dev
+```
+
 If `DETECTOR_BACKEND=yolo` is set but the `vision` extras are **not** installed,
 the worker logs a warning and falls back to the stub detector automatically — no crash.
 
@@ -136,7 +150,7 @@ the worker logs a warning and falls back to the stub detector automatically — 
 ```json
 {
   "video_id": "123",
-  "version": 3,
+  "version": 4,
   "segments": [],
   "tracks": [
     {
@@ -155,7 +169,12 @@ the worker logs a warning and falls back to the stub detector automatically — 
     "tracked_frame_count": 97,
     "average_detections_per_frame": 1.87
   },
-  "notes": "first real CV stages: frame extraction, person detection, tracking"
+  "pose_summary": {
+    "pose_count": 24,
+    "posed_track_count": 2,
+    "average_keypoints_per_pose": 17.0
+  },
+  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation"
 }
 ```
 
@@ -217,10 +236,30 @@ the worker logs a warning and falls back to the stub detector automatically — 
 }
 ```
 
+### `poses.json`
+
+```json
+{
+  "video_id": "123",
+  "version": 1,
+  "pose_count": 24,
+  "poses": [
+    {
+      "frame_index": 10,
+      "timestamp_ms": 5000,
+      "track_id": 1,
+      "keypoints": [
+        { "name": "nose", "x": 120.0, "y": 80.0, "confidence": 0.92 },
+        { "name": "left_shoulder", "x": 100.0, "y": 140.0, "confidence": 0.88 }
+      ]
+    }
+  ]
+}
+```
+
 ## Next steps
 
-1. Pose estimation (2-D keypoints per tracked person)
-2. Motion/state feature derivation from tracks + landmarks
-3. Temporal segmentation
-4. Schema hardening for queryable state output
-5. Optional ontology layers on top
+1. Motion/state feature derivation from tracks + landmarks
+2. Temporal segmentation
+3. Schema hardening for queryable state output
+4. Optional ontology layers on top

@@ -1,11 +1,12 @@
 """Orchestrates the full CV pipeline for a single video.
 
 This module ties together the detector, tracker, pose estimator, feature
-deriver, and segmenter.  The first real CV stages (frame extraction, person
-detection, and multi-frame tracking) are now implemented; later stages still
-use stub implementations.  The pipeline returns three artifacts: a state dict
-(``state.json``), a detections dict (``detections.json``), and a tracks dict
-(``tracks.json``).
+deriver, and segmenter.  Frame extraction, person detection, multi-frame
+tracking, and pose estimation are now implemented; feature derivation and
+segmentation still use stub implementations.  The pipeline returns four
+artifacts: a state dict (``state.json``), a detections dict
+(``detections.json``), a tracks dict (``tracks.json``), and a poses dict
+(``poses.json``).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from libs.pipeline.contracts import (
     Detector,
     FeatureDeriver,
     Frame,
+    PoseEstimate,
     PoseEstimator,
     Segmenter,
     Track,
@@ -44,8 +46,8 @@ def run_pipeline(
     feature_deriver: FeatureDeriver | None = None,
     segmenter: Segmenter | None = None,
     sample_fps: float = 2.0,
-) -> tuple[dict, dict, dict]:
-    """Run the full pipeline and return ``(state, detections, tracks)`` dicts.
+) -> tuple[dict, dict, dict, dict]:
+    """Run the full pipeline and return ``(state, detections, tracks, poses)`` dicts.
 
     Each stage defaults to its stub implementation.  Pass concrete instances
     to wire in real CV logic without changing this orchestration layer.
@@ -54,8 +56,8 @@ def run_pipeline(
         video_id: The ID of the video being processed.
         frames: Pre-extracted :class:`~libs.video.frames.FrameMeta` list.
             When provided each frame is loaded from disk and passed through
-            the detector and tracker.  When ``None`` all CV stages are skipped
-            and the artifacts will contain empty collections.
+            the detector, tracker, and pose estimator.  When ``None`` all CV
+            stages are skipped and the artifacts will contain empty collections.
         detector: Object detector to use (default: StubDetector).
         tracker: Multi-object tracker to use (default: StubTracker).
         pose_estimator: Pose estimator to use (default: StubPoseEstimator).
@@ -65,8 +67,8 @@ def run_pipeline(
             only; stored in the detections artifact).
 
     Returns:
-        A 3-tuple ``(state_dict, detections_dict, tracks_dict)`` matching
-        their respective artifact schemas.
+        A 4-tuple ``(state_dict, detections_dict, tracks_dict, poses_dict)``
+        matching their respective artifact schemas.
     """
     _detector = detector or StubDetector()
     _tracker = tracker or StubTracker()
@@ -79,10 +81,11 @@ def run_pipeline(
         fm.frame_index: fm.timestamp_ms for fm in (frames or [])
     }
 
-    # Detection + tracking stage - iterate extracted frames
+    # Detection + tracking + pose estimation stage - iterate extracted frames
     detections_frames: list[dict] = []
     all_detections: list[Detection] = []
     all_tracks: list[Track] = []
+    all_poses: list[PoseEstimate] = []
 
     for frame_meta in frames or []:
         frame_path = Path(frame_meta.path)
@@ -111,6 +114,10 @@ def run_pipeline(
         # Pass this frame's detections to the tracker.
         all_tracks = _tracker.update(frame_detections)
 
+        # Run pose estimation for tracked humans in this frame.
+        frame_poses = _pose.estimate(cv_frame, all_tracks)
+        all_poses.extend(frame_poses)
+
         detections_frames.append(
             {
                 "frame_index": frame_meta.frame_index,
@@ -126,8 +133,7 @@ def run_pipeline(
             }
         )
 
-    # Later stages (stubs for now)
-    all_poses: list = []
+    # Feature derivation and segmentation are still stubs.
     features = _features.derive(all_tracks, all_poses)
     segments = _segmenter.segment(features)
 
@@ -146,8 +152,16 @@ def run_pipeline(
         total_detections / tracked_frame_count if tracked_frame_count > 0 else 0.0
     )
 
+    # Build pose summary
+    posed_track_ids: set[int] = {p.track_id for p in all_poses}
+    total_keypoints = sum(len(p.keypoints) for p in all_poses)
+    avg_keypoints_per_pose = total_keypoints / len(all_poses) if all_poses else 0.0
+
     # Build tracks artifact
     tracks_artifact = _build_tracks_artifact(video_id, all_tracks, timestamp_by_frame)
+
+    # Build poses artifact
+    poses_artifact = _build_poses_artifact(video_id, all_poses, timestamp_by_frame)
 
     detections_artifact = {
         "video_id": str(video_id),
@@ -158,7 +172,7 @@ def run_pipeline(
 
     state_artifact = {
         "video_id": str(video_id),
-        "version": 3,
+        "version": 4,
         "segments": [vars(s) for s in segments],
         "tracks": tracks_artifact["tracks"],
         "features": [vars(f) for f in features],
@@ -172,10 +186,17 @@ def run_pipeline(
             "tracked_frame_count": tracked_frame_count,
             "average_detections_per_frame": avg_detections_per_frame,
         },
-        "notes": "first real CV stages: frame extraction, person detection, tracking",
+        "pose_summary": {
+            "pose_count": len(all_poses),
+            "posed_track_count": len(posed_track_ids),
+            "average_keypoints_per_pose": avg_keypoints_per_pose,
+        },
+        "notes": (
+            "first real CV stages: frame extraction, person detection, tracking, pose estimation"
+        ),
     }
 
-    return state_artifact, detections_artifact, tracks_artifact
+    return state_artifact, detections_artifact, tracks_artifact, poses_artifact
 
 
 def _build_tracks_artifact(
@@ -202,4 +223,36 @@ def _build_tracks_artifact(
         "version": 1,
         "track_count": len(tracks),
         "tracks": tracks_data,
+    }
+
+
+def _build_poses_artifact(
+    video_id: int | str,
+    poses: list[PoseEstimate],
+    timestamp_by_frame: dict[int, float],
+) -> dict:
+    """Serialise *poses* into the ``poses.json`` artifact dict."""
+    poses_data = [
+        {
+            "frame_index": p.frame_index,
+            "timestamp_ms": timestamp_by_frame.get(p.frame_index, 0.0),
+            "track_id": p.track_id,
+            "keypoints": [
+                {
+                    "name": kp.name,
+                    "x": kp.x,
+                    "y": kp.y,
+                    "confidence": kp.confidence,
+                }
+                for kp in p.keypoints
+            ],
+        }
+        for p in poses
+    ]
+
+    return {
+        "video_id": str(video_id),
+        "version": 1,
+        "pose_count": len(poses),
+        "poses": poses_data,
     }
