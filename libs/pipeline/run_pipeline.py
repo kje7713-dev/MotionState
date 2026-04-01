@@ -2,11 +2,11 @@
 
 This module ties together the detector, tracker, pose estimator, feature
 deriver, and segmenter.  Frame extraction, person detection, multi-frame
-tracking, pose estimation, and generic motion feature derivation are now
-implemented; segmentation still uses a stub implementation.  The pipeline
-returns five artifacts: a state dict (``state.json``), a detections dict
-(``detections.json``), a tracks dict (``tracks.json``), a poses dict
-(``poses.json``), and a features dict (``features.json``).
+tracking, pose estimation, generic motion feature derivation, and temporal
+segmentation are all implemented.  The pipeline returns six artifacts: a
+state dict (``state.json``), a detections dict (``detections.json``), a
+tracks dict (``tracks.json``), a poses dict (``poses.json``), a features
+dict (``features.json``), and a segments dict (``segments.json``).
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from libs.pipeline.contracts import (
     MotionFeature,
     PoseEstimate,
     PoseEstimator,
+    Segment,
     Segmenter,
     Track,
     Tracker,
@@ -30,7 +31,7 @@ from libs.pipeline.contracts import (
 from libs.pipeline.detector import StubDetector
 from libs.pipeline.features_basic import BasicFeatureDeriver
 from libs.pipeline.pose import StubPoseEstimator
-from libs.pipeline.segments import StubSegmenter
+from libs.pipeline.segments_basic import BasicSegmenter
 from libs.pipeline.tracker import StubTracker
 from libs.video.frames import FrameMeta
 
@@ -47,10 +48,11 @@ def run_pipeline(
     feature_deriver: FeatureDeriver | None = None,
     segmenter: Segmenter | None = None,
     sample_fps: float = 2.0,
-) -> tuple[dict, dict, dict, dict, dict]:
-    """Run the full pipeline and return ``(state, detections, tracks, poses, features)`` dicts.
+) -> tuple[dict, dict, dict, dict, dict, dict]:
+    """Run the full pipeline and return
+    ``(state, detections, tracks, poses, features, segments)`` dicts.
 
-    Each stage defaults to its stub implementation.  Pass concrete instances
+    Each stage defaults to its concrete implementation.  Pass concrete instances
     to wire in real CV logic without changing this orchestration layer.
 
     Args:
@@ -64,19 +66,20 @@ def run_pipeline(
         tracker: Multi-object tracker to use (default: StubTracker).
         pose_estimator: Pose estimator to use (default: StubPoseEstimator).
         feature_deriver: Feature deriver to use (default: BasicFeatureDeriver).
-        segmenter: Temporal segmenter to use (default: StubSegmenter).
+        segmenter: Temporal segmenter to use (default: BasicSegmenter).
         sample_fps: Sample rate used during frame extraction (informational
             only; stored in the detections artifact).
 
     Returns:
-        A 5-tuple ``(state_dict, detections_dict, tracks_dict, poses_dict,
-        features_dict)`` matching their respective artifact schemas.
+        A 6-tuple ``(state_dict, detections_dict, tracks_dict, poses_dict,
+        features_dict, segments_dict)`` matching their respective artifact
+        schemas.
     """
     _detector = detector or StubDetector()
     _tracker = tracker or StubTracker()
     _pose = pose_estimator or StubPoseEstimator()
     _features = feature_deriver or BasicFeatureDeriver()
-    _segmenter = segmenter or StubSegmenter()
+    _segmenter = segmenter or BasicSegmenter()
 
     # Build a frame_index -> timestamp_ms lookup for the tracks artifact.
     timestamp_by_frame: dict[int, float] = {
@@ -170,6 +173,10 @@ def run_pipeline(
     featured_track_ids: set[int] = {f.track_id for f in features}
     feature_names: list[str] = sorted({f.name for f in features})
 
+    # Build segmentation summary
+    segment_labels: list[str] = sorted({s.label for s in segments})
+    total_segment_duration_ms = sum(s.end_ms - s.start_ms for s in segments)
+
     # Build tracks artifact
     tracks_artifact = _build_tracks_artifact(video_id, all_tracks, timestamp_by_frame)
 
@@ -178,6 +185,9 @@ def run_pipeline(
 
     # Build features artifact
     features_artifact = _build_features_artifact(video_id, features)
+
+    # Build segments artifact
+    segments_artifact = _build_segments_artifact(video_id, segments)
 
     detections_artifact = {
         "video_id": str(video_id),
@@ -188,7 +198,7 @@ def run_pipeline(
 
     state_artifact = {
         "video_id": str(video_id),
-        "version": 5,
+        "version": 6,
         "segments": [vars(s) for s in segments],
         "tracks": tracks_artifact["tracks"],
         "features": [vars(f) for f in features],
@@ -212,13 +222,25 @@ def run_pipeline(
             "featured_track_count": len(featured_track_ids),
             "feature_names": feature_names,
         },
+        "segmentation_summary": {
+            "segment_count": len(segments),
+            "segment_labels": segment_labels,
+            "total_segment_duration_ms": total_segment_duration_ms,
+        },
         "notes": (
             "first real CV stages: frame extraction, person detection, tracking, "
-            "pose estimation, feature derivation"
+            "pose estimation, feature derivation, temporal segmentation"
         ),
     }
 
-    return state_artifact, detections_artifact, tracks_artifact, poses_artifact, features_artifact
+    return (
+        state_artifact,
+        detections_artifact,
+        tracks_artifact,
+        poses_artifact,
+        features_artifact,
+        segments_artifact,
+    )
 
 
 def _build_tracks_artifact(
@@ -298,5 +320,27 @@ def _build_features_artifact(
                 "value": f.value,
             }
             for f in features
+        ],
+    }
+
+
+def _build_segments_artifact(
+    video_id: int | str,
+    segments: list[Segment],
+) -> dict:
+    """Serialise *segments* into the ``segments.json`` artifact dict."""
+    return {
+        "video_id": str(video_id),
+        "version": 1,
+        "segment_count": len(segments),
+        "segments": [
+            {
+                "start_ms": s.start_ms,
+                "end_ms": s.end_ms,
+                "label": s.label,
+                "confidence": s.confidence,
+                "metadata": s.metadata,
+            }
+            for s in segments
         ],
     }

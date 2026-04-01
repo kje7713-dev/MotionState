@@ -12,7 +12,8 @@
 6. **Multi-frame tracking** – assigns persistent track IDs across frames using a deterministic IOU-based tracker (stub by default; IOU tracker when `TRACKER_BACKEND=iou`).
 7. **Pose estimation** – estimates 2-D body keypoints for each tracked person per frame (stub by default; MediaPipe BlazePose when `POSE_BACKEND=mediapipe`).
 8. **Generic motion feature derivation** – derives scalar geometric and temporal features from tracked pose data (torso angle, joint angles, widths, centroid velocity, etc.); writes `features.json`.
-9. **Structured artifacts** – writes five time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), `poses.json` (per-frame body keypoints), and `features.json` (derived motion features).
+9. **Generic temporal segmentation** – divides the feature time-series into labelled windows using motion-intensity thresholding and adjacent-window merging; writes `segments.json`.
+10. **Structured artifacts** – writes six time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), `poses.json` (per-frame body keypoints), `features.json` (derived motion features), and `segments.json` (temporal segments).
 
 ## What is NOT in scope (yet)
 
@@ -20,7 +21,7 @@
 - No coaching logic or scoring engine
 - No real-time guarantees
 - No frontend / product UI
-- No temporal segmentation
+- No domain-specific segment interpretation
 
 ## Architecture
 
@@ -38,7 +39,7 @@
                               │  data/artifacts/{video_id}/                    │
                               │    frames/  state.json                         │
                               │    detections.json  tracks.json                │
-                              │    poses.json  features.json                   │
+                              │    poses.json  features.json  segments.json    │
                               └────────────────────────────────────────────────┘
 ```
 
@@ -109,12 +110,16 @@ it ships as part of the base install.
   - `keypoint_visibility_count` – number of high-confidence body landmarks
   - `bbox_area` – bounding-box area in pixels²
   - `centroid_velocity` – keypoint-centroid displacement per millisecond between consecutive frames
-- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, pose summary, and feature summary
+- **Generic temporal segmentation** – divides the motion feature time-series into fixed-size windows, classifies each window with a domain-agnostic label, and merges adjacent same-label windows; writes `segments.json`. Generic labels:
+  - `low_motion` – low centroid velocity; person is relatively still
+  - `active_motion` – high centroid velocity; person is actively moving
+  - `transition_window` – velocity between low and active thresholds; ambiguous motion
+  - `sparse_data` – too few features in the window to classify reliably
+- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, pose summary, feature summary, and segmentation summary
 
 ## Current limitations
 
-- **Segmentation still stubbed** – temporal segmentation returns empty results
-- **Domain ontology intentionally absent** – no sport-specific labels or scoring logic
+- **Domain ontology intentionally absent** – no sport-specific labels, no scoring, no coaching logic
 
 ## Configuration
 
@@ -158,8 +163,16 @@ the worker logs a warning and falls back to the stub detector automatically — 
 ```json
 {
   "video_id": "123",
-  "version": 5,
-  "segments": [],
+  "version": 6,
+  "segments": [
+    {
+      "start_ms": 0,
+      "end_ms": 2500,
+      "label": "low_motion",
+      "confidence": 0.88,
+      "metadata": { "feature_count": 12 }
+    }
+  ],
   "tracks": [
     {
       "track_id": 1,
@@ -200,7 +213,16 @@ the worker logs a warning and falls back to the stub detector automatically — 
       "centroid_velocity"
     ]
   },
-  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation, feature derivation"
+  "segmentation_summary": {
+    "segment_count": 4,
+    "segment_labels": [
+      "low_motion",
+      "active_motion",
+      "transition_window"
+    ],
+    "total_segment_duration_ms": 373850
+  },
+  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation, feature derivation, temporal segmentation"
 }
 ```
 
@@ -309,8 +331,33 @@ the worker logs a warning and falls back to the stub detector automatically — 
 }
 ```
 
+### `segments.json`
+
+```json
+{
+  "video_id": "123",
+  "version": 1,
+  "segment_count": 4,
+  "segments": [
+    {
+      "start_ms": 0,
+      "end_ms": 2500,
+      "label": "low_motion",
+      "confidence": 0.88,
+      "metadata": { "feature_count": 12 }
+    },
+    {
+      "start_ms": 2500,
+      "end_ms": 5200,
+      "label": "active_motion",
+      "confidence": 0.91,
+      "metadata": { "feature_count": 31 }
+    }
+  ]
+}
+```
+
 ## Next steps
 
-1. Temporal segmentation of motion feature time-series
-2. Schema hardening for queryable state output
-3. Optional ontology layers on top
+1. Schema hardening for queryable state output
+2. Optional ontology layers on top
