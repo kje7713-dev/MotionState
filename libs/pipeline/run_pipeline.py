@@ -7,6 +7,9 @@ segmentation are all implemented.  The pipeline returns six artifacts: a
 state dict (``state.json``), a detections dict (``detections.json``), a
 tracks dict (``tracks.json``), a poses dict (``poses.json``), a features
 dict (``features.json``), and a segments dict (``segments.json``).
+
+Clip generation and timeline manifest writing are performed by the worker
+after the pipeline completes (they require the video file on disk).
 """
 
 from __future__ import annotations
@@ -198,7 +201,7 @@ def run_pipeline(
 
     state_artifact = {
         "video_id": str(video_id),
-        "version": 6,
+        "version": 7,
         "segments": [vars(s) for s in segments],
         "tracks": tracks_artifact["tracks"],
         "features": [vars(f) for f in features],
@@ -227,9 +230,14 @@ def run_pipeline(
             "segment_labels": segment_labels,
             "total_segment_duration_ms": total_segment_duration_ms,
         },
+        "clip_summary": {
+            "clip_count": 0,
+            "total_clip_duration_ms": 0,
+        },
+        "manifest_path": "",
         "notes": (
             "first real CV stages: frame extraction, person detection, tracking, "
-            "pose estimation, feature derivation, temporal segmentation"
+            "pose estimation, feature derivation, temporal segmentation, clip generation"
         ),
     }
 

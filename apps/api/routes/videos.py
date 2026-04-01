@@ -1,5 +1,6 @@
 """Video upload and retrieval routes."""
 
+import json
 import uuid
 from pathlib import Path
 
@@ -114,3 +115,41 @@ async def list_artifacts(
         }
         for a in artifacts
     ]
+
+
+@router.get("/{video_id}/timeline")
+async def get_timeline(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the parsed timeline manifest for a video.
+
+    The manifest ties all pipeline artifacts together with a per-segment
+    timeline that references clip paths and related artifact files.
+
+    Returns:
+        The parsed ``timeline_manifest.json`` contents.
+
+    Raises:
+        HTTPException 404: if the video, the manifest artifact row, or the
+            manifest file on disk cannot be found.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    result = await db.execute(
+        select(Artifact).where(
+            Artifact.video_id == video_id,
+            Artifact.type == "timeline_manifest",
+        )
+    )
+    artifact = result.scalars().first()
+    if artifact is None:
+        raise HTTPException(status_code=404, detail="Timeline manifest not found")
+
+    manifest_file = Path(artifact.path)
+    if not manifest_file.exists():
+        raise HTTPException(status_code=404, detail="Timeline manifest file not found")
+
+    return json.loads(manifest_file.read_text())

@@ -13,7 +13,9 @@
 7. **Pose estimation** – estimates 2-D body keypoints for each tracked person per frame (stub by default; MediaPipe BlazePose when `POSE_BACKEND=mediapipe`).
 8. **Generic motion feature derivation** – derives scalar geometric and temporal features from tracked pose data (torso angle, joint angles, widths, centroid velocity, etc.); writes `features.json`.
 9. **Generic temporal segmentation** – divides the feature time-series into labelled windows using motion-intensity thresholding and adjacent-window merging; writes `segments.json`.
-10. **Structured artifacts** – writes six time-indexed JSON artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), `poses.json` (per-frame body keypoints), `features.json` (derived motion features), and `segments.json` (temporal segments).
+10. **Clip generation** – extracts an MP4 clip for each temporal segment from the normalized video; writes files under `data/artifacts/{video_id}/clips/`.
+11. **Timeline manifest** – writes `timeline_manifest.json`, a downstream-friendly summary that ties all artifacts together with a per-segment timeline containing clip paths and related artifact references.
+12. **Structured artifacts** – writes eight time-indexed artifacts per video: `state.json` (summary + pipeline output), `detections.json` (per-frame bounding boxes), `tracks.json` (persistent track histories), `poses.json` (per-frame body keypoints), `features.json` (derived motion features), `segments.json` (temporal segments), clip files, and `timeline_manifest.json`.
 
 ## What is NOT in scope (yet)
 
@@ -22,6 +24,7 @@
 - No real-time guarantees
 - No frontend / product UI
 - No domain-specific segment interpretation
+- No ontology / semantic labelling
 
 ## Architecture
 
@@ -40,6 +43,7 @@
                               │    frames/  state.json                         │
                               │    detections.json  tracks.json                │
                               │    poses.json  features.json  segments.json    │
+                              │    clips/  timeline_manifest.json              │
                               └────────────────────────────────────────────────┘
 ```
 
@@ -60,6 +64,7 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | POST | `/videos` | Upload a video file |
 | GET | `/videos/{video_id}` | Get video status |
 | GET | `/videos/{video_id}/artifacts` | List artifact records for a video |
+| GET | `/videos/{video_id}/timeline` | Return the parsed timeline manifest |
 | GET | `/jobs/{job_id}` | Get job status |
 
 ## Development
@@ -115,7 +120,9 @@ it ships as part of the base install.
   - `active_motion` – high centroid velocity; person is actively moving
   - `transition_window` – velocity between low and active thresholds; ambiguous motion
   - `sparse_data` – too few features in the window to classify reliably
-- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, pose summary, feature summary, and segmentation summary
+- **Clip generation** – extracts one MP4 clip per segment from the normalized video using FFmpeg; clips are written under `data/artifacts/{video_id}/clips/` with deterministic filenames (e.g. `segment_000_low_motion.mp4`)
+- **Timeline manifest** – writes `timeline_manifest.json` tying all pipeline artifacts together with a per-segment timeline; each entry includes `segment_index`, `start_ms`, `end_ms`, `label`, `confidence`, `clip_path`, and `related_artifacts` references
+- **State artifact** – writes `state.json` with per-video detection summary, tracking summary, pose summary, feature summary, segmentation summary, clip summary, and manifest path
 
 ## Current limitations
 
@@ -163,7 +170,7 @@ the worker logs a warning and falls back to the stub detector automatically — 
 ```json
 {
   "video_id": "123",
-  "version": 6,
+  "version": 7,
   "segments": [
     {
       "start_ms": 0,
@@ -222,7 +229,12 @@ the worker logs a warning and falls back to the stub detector automatically — 
     ],
     "total_segment_duration_ms": 373850
   },
-  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation, feature derivation, temporal segmentation"
+  "clip_summary": {
+    "clip_count": 4,
+    "total_clip_duration_ms": 373850
+  },
+  "manifest_path": "data/artifacts/123/timeline_manifest.json",
+  "notes": "first real CV stages: frame extraction, person detection, tracking, pose estimation, feature derivation, temporal segmentation, clip generation"
 }
 ```
 
@@ -352,6 +364,38 @@ the worker logs a warning and falls back to the stub detector automatically — 
       "label": "active_motion",
       "confidence": 0.91,
       "metadata": { "feature_count": 31 }
+    }
+  ]
+}
+```
+
+### `timeline_manifest.json`
+
+```json
+{
+  "video_id": "123",
+  "version": 1,
+  "duration_seconds": 373.85,
+  "artifacts": {
+    "state": "data/artifacts/123/state.json",
+    "detections": "data/artifacts/123/detections.json",
+    "tracks": "data/artifacts/123/tracks.json",
+    "poses": "data/artifacts/123/poses.json",
+    "features": "data/artifacts/123/features.json",
+    "segments": "data/artifacts/123/segments.json"
+  },
+  "timeline": [
+    {
+      "segment_index": 0,
+      "start_ms": 0,
+      "end_ms": 2500,
+      "label": "low_motion",
+      "confidence": 0.88,
+      "clip_path": "data/artifacts/123/clips/segment_000_low_motion.mp4",
+      "related_artifacts": {
+        "segments": "data/artifacts/123/segments.json",
+        "features": "data/artifacts/123/features.json"
+      }
     }
   ]
 }
