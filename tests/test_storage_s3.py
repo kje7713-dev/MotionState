@@ -107,12 +107,26 @@ async def test_s3_exists_true_when_head_object_succeeds():
 
 
 @pytest.mark.asyncio
-async def test_s3_exists_false_when_head_object_raises():
-    """exists() returns False when head_object raises any exception."""
+async def test_s3_exists_false_when_head_object_raises_404():
+    """exists() returns False when head_object raises a 404 ClientError."""
     storage, mock_client = _make_s3_storage()
-    mock_client.head_object.side_effect = Exception("NoSuchKey")
+    exc = Exception("NoSuchKey")
+    exc.response = {"Error": {"Code": "404"}}
+    mock_client.head_object.side_effect = exc
 
     assert await storage.exists("artifacts/1/missing.json") is False
+
+
+@pytest.mark.asyncio
+async def test_s3_exists_reraises_non_404_errors():
+    """exists() re-raises exceptions that are not 404 / NoSuchKey."""
+    storage, mock_client = _make_s3_storage()
+    exc = Exception("AccessDenied")
+    exc.response = {"Error": {"Code": "403"}}
+    mock_client.head_object.side_effect = exc
+
+    with pytest.raises(Exception, match="AccessDenied"):
+        await storage.exists("artifacts/1/state.json")
 
 
 # ---------------------------------------------------------------------------

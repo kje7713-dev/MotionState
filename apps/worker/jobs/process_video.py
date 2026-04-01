@@ -204,7 +204,7 @@ async def handle_process_video(message: dict) -> None:
                 "version": 1,
                 "duration_seconds": meta["duration_seconds"],
                 "artifacts": {
-                    "state": det_saved.replace("detections.json", "state.json"),
+                    "state": artifact_key(video_id, "state.json"),
                     "detections": det_saved,
                     "tracks": trk_saved,
                     "poses": poses_saved,
@@ -218,7 +218,7 @@ async def handle_process_video(message: dict) -> None:
                         "end_ms": seg["end_ms"],
                         "label": seg["label"],
                         "confidence": confidence_by_index.get(seg["segment_index"], 1.0),
-                        "clip_path": clip_saved_paths[i] if i < len(clip_saved_paths) else "",
+                        "clip_path": clip_saved_paths[i],
                         "related_artifacts": {
                             "segments": seg_saved,
                             "features": feat_saved,
@@ -310,7 +310,7 @@ async def handle_process_video(message: dict) -> None:
                     Artifact(
                         video_id=video_id,
                         type="segment_clip",
-                        path=clip_saved_paths[i] if i < len(clip_saved_paths) else clip["path"],
+                        path=clip_saved_paths[i],
                         metadata_json={
                             "segment_index": clip["segment_index"],
                             "label": clip["label"],

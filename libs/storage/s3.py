@@ -96,10 +96,17 @@ class S3Storage(StorageBackend):
                 Key=path,
             )
             return True
-        except Exception:
-            # ClientError with 404 means the key does not exist; any other
-            # exception is also treated as non-existent for safety.
-            return False
+        except Exception as exc:
+            # botocore.exceptions.ClientError carries an HTTP response dict.
+            # A 404 / NoSuchKey response means the object does not exist.
+            # Any other error (permissions, network, etc.) is re-raised so it
+            # is visible to the caller rather than silently returning False.
+            http_response = getattr(exc, "response", None)
+            if http_response is not None:
+                code = http_response.get("Error", {}).get("Code", "")
+                if code in ("404", "NoSuchKey"):
+                    return False
+            raise
 
     def full_path(self, path: str) -> Path:
         """Not supported for remote object storage.

@@ -223,13 +223,26 @@ async def get_timeline(
         raise HTTPException(status_code=404, detail="Timeline manifest not found")
 
     if settings.storage_backend == "s3":
+        storage = get_storage()
         try:
-            storage = get_storage()
             data = await storage.load(artifact.path)
-            return json.loads(data)
         except Exception as exc:
+            # Distinguish object-not-found from other storage errors.
+            http_response = getattr(exc, "response", None)
+            if http_response is not None:
+                code = http_response.get("Error", {}).get("Code", "")
+                if code in ("404", "NoSuchKey"):
+                    raise HTTPException(
+                        status_code=404, detail="Timeline manifest object not found"
+                    ) from exc
             raise HTTPException(
-                status_code=404, detail="Timeline manifest object not found"
+                status_code=500, detail="Storage backend error while reading timeline manifest"
+            ) from exc
+        try:
+            return json.loads(data)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=500, detail="Timeline manifest is not valid JSON"
             ) from exc
 
     # Local backend: read directly from disk.
