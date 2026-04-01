@@ -1,14 +1,24 @@
 """Unit tests for the S3-compatible storage backend.
 
 All S3 calls are mocked via unittest.mock – no real AWS / R2 credentials
-are required to run these tests.
+are required to run these tests.  boto3 itself is also mocked at the module
+level so these tests run even when the ``[storage]`` optional dependencies are
+not installed (e.g. in the base dev CI install).
 """
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Ensure boto3 is importable even when the [storage] extras are not installed.
+# The mock is placed in sys.modules *before* any import that would trigger it.
+# ---------------------------------------------------------------------------
+if "boto3" not in sys.modules:
+    sys.modules["boto3"] = MagicMock()
 
 # ---------------------------------------------------------------------------
 # Helpers

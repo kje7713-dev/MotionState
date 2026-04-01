@@ -1,11 +1,22 @@
-"""Tests for the POST /videos/upload-init endpoint."""
+"""Tests for the POST /videos/upload-init endpoint.
+
+boto3 is mocked at the module level so these tests run even when the
+``[storage]`` optional dependencies are not installed.
+"""
 
 from __future__ import annotations
 
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+
+# ---------------------------------------------------------------------------
+# Ensure boto3 is importable even when the [storage] extras are not installed.
+# ---------------------------------------------------------------------------
+if "boto3" not in sys.modules:
+    sys.modules["boto3"] = MagicMock()
 
 # ---------------------------------------------------------------------------
 # App fixture (matches pattern used in other API tests)

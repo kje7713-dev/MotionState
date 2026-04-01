@@ -4,14 +4,24 @@ Covers:
 - local backend: path validation and file reading
 - s3 backend: reads via storage.load() without filesystem access
 - read_artifact_json dispatch logic
+
+boto3 is mocked at the module level so these tests run even when the
+``[storage]`` optional dependencies are not installed.
 """
 
 from __future__ import annotations
 
 import json
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# Ensure boto3 is importable even when the [storage] extras are not installed.
+# ---------------------------------------------------------------------------
+if "boto3" not in sys.modules:
+    sys.modules["boto3"] = MagicMock()
 
 from libs.config import settings
 
