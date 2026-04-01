@@ -61,11 +61,40 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 ## Development
 
 ```bash
+# Base utility install (no heavy CV deps)
 pip install -e ".[dev]"
+
+# Full install with vision extras (enables YOLOv8 detector path)
+pip install -e ".[dev,vision]"
+
 make test      # run pytest
 make lint      # ruff check
 make format    # ruff format
 ```
+
+## Install modes
+
+| Mode | Command | When to use |
+|------|---------|-------------|
+| Base (default) | `pip install -e .` | API, worker with stub detector, tests — no heavy deps |
+| Vision extras | `pip install -e ".[vision]"` | Enable the real YOLOv8 detector path |
+
+The default install works without any CV packages.  Only install the `vision`
+extras if you intend to run `DETECTOR_BACKEND=yolo`.
+
+## Current capability
+
+- **Video normalization** – re-encodes uploads to a consistent format/resolution via FFmpeg
+- **Frame extraction** – samples JPEG frames at a configurable rate (default: 2 FPS)
+- **Person detection artifact** – runs a configurable detector (stub by default; YOLOv8 when `vision` extras are installed and `DETECTOR_BACKEND=yolo`) and writes `detections.json`
+- **State artifact** – writes `state.json` with per-video detection summary counts
+
+## Current limitations
+
+- **Tracking not implemented** – no multi-object tracking (ByteTrack / DeepSORT)
+- **Pose estimation not implemented** – no 2-D keypoint extraction
+- **Feature derivation still stubbed** – motion/state feature derivation returns empty results
+- **Domain ontology intentionally absent** – no sport-specific labels or scoring logic
 
 ## Configuration
 
@@ -79,9 +108,12 @@ Key settings (see `.env.example` for the full list):
 
 To enable YOLOv8 detection:
 ```bash
-pip install ultralytics
+pip install -e ".[vision]"   # or: pip install ultralytics pillow numpy
 DETECTOR_BACKEND=yolo make dev
 ```
+
+If `DETECTOR_BACKEND=yolo` is set but the `vision` extras are **not** installed,
+the worker logs a warning and falls back to the stub detector automatically — no crash.
 
 ## Artifact schemas
 
