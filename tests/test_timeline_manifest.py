@@ -105,23 +105,31 @@ def _patch_settings(mock_settings, tmp_path):
     mock_settings.tracker_max_age = 30
     mock_settings.pose_backend = "stub"
     mock_settings.pose_min_confidence = 0.3
+    mock_settings.storage_backend = "local"
 
 
-def _fake_clips_info() -> list[dict]:
+def _fake_clips_info(tmp_path) -> list[dict]:
+    """Return fake clip info with real files written under tmp_path."""
+    clips_dir = tmp_path / "artifacts" / "1" / "clips"
+    clips_dir.mkdir(parents=True, exist_ok=True)
+    p1 = clips_dir / "segment_000_low_motion.mp4"
+    p2 = clips_dir / "segment_001_active_motion.mp4"
+    p1.write_bytes(b"fake-clip-1")
+    p2.write_bytes(b"fake-clip-2")
     return [
         {
             "segment_index": 0,
             "label": "low_motion",
             "start_ms": 0.0,
             "end_ms": 2500.0,
-            "path": "data/artifacts/1/clips/segment_000_low_motion.mp4",
+            "path": str(p1),
         },
         {
             "segment_index": 1,
             "label": "active_motion",
             "start_ms": 2500.0,
             "end_ms": 5000.0,
-            "path": "data/artifacts/1/clips/segment_001_active_motion.mp4",
+            "path": str(p2),
         },
     ]
 
@@ -257,7 +265,7 @@ async def test_timeline_manifest_artifacts_section_references_all_json_files(tmp
 async def test_timeline_manifest_timeline_has_one_entry_per_clip(tmp_path):
     """The timeline list contains one entry per generated clip."""
     mock_db, _, _, _ = _make_mock_db(tmp_path)
-    fake_clips = _fake_clips_info()
+    fake_clips = _fake_clips_info(tmp_path)
 
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
@@ -297,7 +305,7 @@ async def test_timeline_entry_has_required_fields(tmp_path):
     """Each timeline entry contains segment_index, start_ms, end_ms, label, confidence,
     clip_path, and related_artifacts."""
     mock_db, _, _, _ = _make_mock_db(tmp_path)
-    fake_clips = _fake_clips_info()
+    fake_clips = _fake_clips_info(tmp_path)
 
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
@@ -428,7 +436,7 @@ async def test_state_json_includes_manifest_path(tmp_path):
 async def test_clip_artifact_rows_are_persisted(tmp_path):
     """One segment_clip Artifact row is added per generated clip."""
     mock_db, _, _, added_objects = _make_mock_db(tmp_path)
-    fake_clips = _fake_clips_info()
+    fake_clips = _fake_clips_info(tmp_path)
 
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
@@ -465,7 +473,7 @@ async def test_clip_artifact_rows_are_persisted(tmp_path):
 async def test_clip_artifact_metadata_includes_required_fields(tmp_path):
     """Each segment_clip Artifact row metadata contains segment_index, label, start_ms, end_ms."""
     mock_db, _, _, added_objects = _make_mock_db(tmp_path)
-    fake_clips = _fake_clips_info()
+    fake_clips = _fake_clips_info(tmp_path)
 
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),

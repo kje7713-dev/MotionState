@@ -10,7 +10,7 @@ Steps:
 6. Generate MP4 clips for each segment.
 7. Write timeline_manifest.json tying all artifacts together.
 8. Write state.json, detections.json, tracks.json, poses.json, features.json, segments.json,
-   clip files, and timeline_manifest.json artifacts.
+   clip files, and timeline_manifest.json artifacts through the configured storage backend.
 9. Create Artifact rows for all files.
 10. Mark job + video as done.
 """
@@ -23,6 +23,7 @@ from libs.config import settings
 from libs.db import AsyncSessionLocal
 from libs.models import Artifact, Job, JobStatus, Video, VideoStatus
 from libs.pipeline.run_pipeline import run_pipeline
+from libs.storage import artifact_key, get_storage, normalized_video_key
 from libs.video.clips import generate_clips
 from libs.video.ffmpeg import normalize_video, probe_video
 from libs.video.frames import extract_frames
@@ -78,6 +79,15 @@ def _build_pose_estimator():
     return StubPoseEstimator()
 
 
+async def _save_json(storage, key: str, data: dict) -> str:
+    """Serialize *data* to JSON bytes and persist via *storage*.
+
+    Returns:
+        The canonical path / key returned by the storage backend.
+    """
+    return await storage.save(json.dumps(data, indent=2).encode(), key)
+
+
 async def handle_process_video(message: dict) -> None:
     """Process a single ``process_video`` job message."""
     job_id: int = message["job_id"]
@@ -101,6 +111,8 @@ async def handle_process_video(message: dict) -> None:
             if not source or not Path(source).exists():
                 raise FileNotFoundError(f"Source video not found: {source}")
 
+            storage = get_storage(settings)
+
             # --- Normalize ---
             norm_dir = Path(settings.normalized_dir)
             norm_dir.mkdir(parents=True, exist_ok=True)
@@ -112,7 +124,9 @@ async def handle_process_video(message: dict) -> None:
             meta = probe_video(str(norm_path))
             logger.info("Probe result for video %s: %s", video_id, meta)
 
-            # --- Extract frames ---
+            # --- Extract frames (always local; frames are transient) ---
+            # Frames are intermediate and kept on local disk for pipeline speed.
+            # Only the final JSON artifacts and clips are persisted via storage.
             artifact_dir = Path(settings.artifacts_dir) / str(video_id)
             artifact_dir.mkdir(parents=True, exist_ok=True)
             frames_dir = artifact_dir / "frames"
@@ -137,40 +151,51 @@ async def handle_process_video(message: dict) -> None:
             )
 
             # --- Write detections artifact ---
-            detections_path = artifact_dir / "detections.json"
-            detections_path.write_text(json.dumps(detections, indent=2))
-            logger.info("Detections artifact written to %s", detections_path)
+            det_key = artifact_key(video_id, "detections.json")
+            det_saved = await _save_json(storage, det_key, detections)
+            logger.info("Detections artifact written to %s", det_saved)
 
             # --- Write tracks artifact ---
-            tracks_path = artifact_dir / "tracks.json"
-            tracks_path.write_text(json.dumps(tracks, indent=2))
-            logger.info("Tracks artifact written to %s", tracks_path)
+            trk_key = artifact_key(video_id, "tracks.json")
+            trk_saved = await _save_json(storage, trk_key, tracks)
+            logger.info("Tracks artifact written to %s", trk_saved)
 
             # --- Write poses artifact ---
-            poses_path = artifact_dir / "poses.json"
-            poses_path.write_text(json.dumps(poses, indent=2))
-            logger.info("Poses artifact written to %s", poses_path)
+            poses_key = artifact_key(video_id, "poses.json")
+            poses_saved = await _save_json(storage, poses_key, poses)
+            logger.info("Poses artifact written to %s", poses_saved)
 
             # --- Write features artifact ---
-            features_path = artifact_dir / "features.json"
-            features_path.write_text(json.dumps(features, indent=2))
-            logger.info("Features artifact written to %s", features_path)
+            feat_key = artifact_key(video_id, "features.json")
+            feat_saved = await _save_json(storage, feat_key, features)
+            logger.info("Features artifact written to %s", feat_saved)
 
             # --- Write segments artifact ---
-            segments_path = artifact_dir / "segments.json"
-            segments_path.write_text(json.dumps(segments, indent=2))
-            logger.info("Segments artifact written to %s", segments_path)
+            seg_key = artifact_key(video_id, "segments.json")
+            seg_saved = await _save_json(storage, seg_key, segments)
+            logger.info("Segments artifact written to %s", seg_saved)
 
-            # --- Generate clips ---
+            # --- Generate clips (local temp dir; then upload via storage) ---
             clips_dir = artifact_dir / "clips"
             clips_info = generate_clips(norm_path, segments["segments"], clips_dir)
             logger.info("Generated %d clips for video %s", len(clips_info), video_id)
 
+            # Upload each clip through the storage backend and record the
+            # canonical path returned by the backend.
+            clip_saved_paths: list[str] = []
+            for clip in clips_info:
+                clip_local = Path(clip["path"])
+                clip_rel_key = artifact_key(
+                    video_id, f"clips/{clip_local.name}"
+                )
+                clip_saved = await storage.save(clip_local.read_bytes(), clip_rel_key)
+                clip_saved_paths.append(clip_saved)
+
             # --- Build timeline manifest ---
-            base = str(artifact_dir)
+            # Use the canonical paths returned by the storage backend so that
+            # the manifest references the correct locations in all backends.
             total_clip_duration_ms = sum(c["end_ms"] - c["start_ms"] for c in clips_info)
-            manifest_path = artifact_dir / "timeline_manifest.json"
-            # Build a confidence lookup keyed by segment index for safe retrieval.
+            manifest_key = artifact_key(video_id, "timeline_manifest.json")
             confidence_by_index = {
                 i: s.get("confidence", 1.0) for i, s in enumerate(segments["segments"])
             }
@@ -179,12 +204,12 @@ async def handle_process_video(message: dict) -> None:
                 "version": 1,
                 "duration_seconds": meta["duration_seconds"],
                 "artifacts": {
-                    "state": f"{base}/state.json",
-                    "detections": f"{base}/detections.json",
-                    "tracks": f"{base}/tracks.json",
-                    "poses": f"{base}/poses.json",
-                    "features": f"{base}/features.json",
-                    "segments": f"{base}/segments.json",
+                    "state": artifact_key(video_id, "state.json"),
+                    "detections": det_saved,
+                    "tracks": trk_saved,
+                    "poses": poses_saved,
+                    "features": feat_saved,
+                    "segments": seg_saved,
                 },
                 "timeline": [
                     {
@@ -193,34 +218,34 @@ async def handle_process_video(message: dict) -> None:
                         "end_ms": seg["end_ms"],
                         "label": seg["label"],
                         "confidence": confidence_by_index.get(seg["segment_index"], 1.0),
-                        "clip_path": seg["path"],
+                        "clip_path": clip_saved_paths[i],
                         "related_artifacts": {
-                            "segments": f"{base}/segments.json",
-                            "features": f"{base}/features.json",
+                            "segments": seg_saved,
+                            "features": feat_saved,
                         },
                     }
-                    for seg in clips_info
+                    for i, seg in enumerate(clips_info)
                 ],
             }
-            manifest_path.write_text(json.dumps(manifest, indent=2))
-            logger.info("Timeline manifest written to %s", manifest_path)
+            manifest_saved = await _save_json(storage, manifest_key, manifest)
+            logger.info("Timeline manifest written to %s", manifest_saved)
 
             # --- Update state with clip summary and manifest path ---
             state["clip_summary"] = {
                 "clip_count": len(clips_info),
                 "total_clip_duration_ms": total_clip_duration_ms,
             }
-            state["manifest_path"] = str(manifest_path)
-            state_path = artifact_dir / "state.json"
-            state_path.write_text(json.dumps(state, indent=2))
-            logger.info("State artifact written to %s", state_path)
+            state["manifest_path"] = manifest_saved
+            state_key = artifact_key(video_id, "state.json")
+            state_saved = await _save_json(storage, state_key, state)
+            logger.info("State artifact written to %s", state_saved)
 
             # --- Persist artifact rows ---
             db.add(
                 Artifact(
                     video_id=video_id,
                     type="state",
-                    path=str(state_path),
+                    path=state_saved,
                     metadata_json={"version": state["version"]},
                 )
             )
@@ -228,7 +253,7 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="detections",
-                    path=str(detections_path),
+                    path=det_saved,
                     metadata_json={
                         "version": detections["version"],
                         "sample_fps": settings.frame_sample_fps,
@@ -240,7 +265,7 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="tracks",
-                    path=str(tracks_path),
+                    path=trk_saved,
                     metadata_json={
                         "version": tracks["version"],
                         "track_count": tracks["track_count"],
@@ -251,7 +276,7 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="poses",
-                    path=str(poses_path),
+                    path=poses_saved,
                     metadata_json={
                         "version": poses["version"],
                         "pose_count": poses["pose_count"],
@@ -262,7 +287,7 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="features",
-                    path=str(features_path),
+                    path=feat_saved,
                     metadata_json={
                         "version": features["version"],
                         "feature_count": features["feature_count"],
@@ -273,19 +298,19 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="segments",
-                    path=str(segments_path),
+                    path=seg_saved,
                     metadata_json={
                         "version": segments["version"],
                         "segment_count": segments["segment_count"],
                     },
                 )
             )
-            for clip in clips_info:
+            for i, clip in enumerate(clips_info):
                 db.add(
                     Artifact(
                         video_id=video_id,
                         type="segment_clip",
-                        path=clip["path"],
+                        path=clip_saved_paths[i],
                         metadata_json={
                             "segment_index": clip["segment_index"],
                             "label": clip["label"],
@@ -298,13 +323,13 @@ async def handle_process_video(message: dict) -> None:
                 Artifact(
                     video_id=video_id,
                     type="timeline_manifest",
-                    path=str(manifest_path),
+                    path=manifest_saved,
                     metadata_json={"version": manifest["version"]},
                 )
             )
 
             # --- Update video ---
-            video.normalized_path = str(norm_path)
+            video.normalized_path = normalized_video_key(video_id)
             video.duration_seconds = meta["duration_seconds"]
             video.fps = meta["fps"]
             video.width = meta["width"]
@@ -324,3 +349,7 @@ async def handle_process_video(message: dict) -> None:
             video.status = VideoStatus.error
             await db.commit()
             raise
+
+
+
+

@@ -25,26 +25,33 @@
 - No frontend / product UI
 - No domain-specific segment interpretation
 - No ontology / semantic labelling
+- No multi-tenant authentication
 
 ## Architecture
 
 ```
-┌──────────┐   POST /videos   ┌───────────┐   Redis queue   ┌────────────┐
-│  Client  │ ──────────────►  │  FastAPI  │ ──────────────► │   Worker   │
-└──────────┘                  │   (API)   │                  │  (Python)  │
-                              └─────┬─────┘                  └─────┬──────┘
-                                    │                               │
-                              Postgres (metadata)     FFmpeg + detector + tracker
-                                    │                     + pose estimator
-                              ┌─────▼──────────────────+ feature deriver──────┐
-                              │            Local filesystem                    │
-                              │  data/uploads/  data/normalized/               │
-                              │  data/artifacts/{video_id}/                    │
-                              │    frames/  state.json                         │
-                              │    detections.json  tracks.json                │
-                              │    poses.json  features.json  segments.json    │
-                              │    clips/  timeline_manifest.json              │
-                              └────────────────────────────────────────────────┘
+┌──────────┐   POST /videos         ┌───────────┐   Redis queue   ┌────────────┐
+│  Client  │ ───────────────────►   │  FastAPI  │ ──────────────► │   Worker   │
+│          │   POST /videos/        │   (API)   │                  │  (Python)  │
+│          │       upload-init  ◄── └─────┬─────┘                  └─────┬──────┘
+│          │   PUT <signed-url>            │                               │
+│          │ ─────────────────►    Postgres (metadata)     FFmpeg + CV pipeline
+└──────────┘    (S3 / R2)                  │                 + storage backend
+                                    ┌─────▼──────────────────────────────────┐
+                                    │     Swappable storage backend          │
+                                    │                                        │
+                                    │  local (default):                      │
+                                    │    data/artifacts/{video_id}/          │
+                                    │      frames/  state.json               │
+                                    │      detections.json  tracks.json      │
+                                    │      poses.json  features.json         │
+                                    │      segments.json  clips/             │
+                                    │      timeline_manifest.json            │
+                                    │                                        │
+                                    │  S3 / R2:                              │
+                                    │    artifacts/{video_id}/state.json     │
+                                    │    artifacts/{video_id}/clips/…        │
+                                    └────────────────────────────────────────┘
 ```
 
 ## Quick start
@@ -61,7 +68,8 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/health` | Liveness check |
-| POST | `/videos` | Upload a video file |
+| POST | `/videos` | Upload a video file (simple multipart; dev/local path) |
+| POST | `/videos/upload-init` | Prepare a direct-to-storage upload; returns signed upload URL |
 | GET | `/videos/{video_id}` | Get video status |
 | GET | `/videos/{video_id}/artifacts` | List artifact records for a video |
 | GET | `/videos/{video_id}/timeline` | Return the parsed timeline manifest |
@@ -85,11 +93,100 @@ pip install -e ".[dev,vision]"
 # Full install with pose extras (enables MediaPipe pose estimator path)
 pip install -e ".[dev,pose]"
 
+# Full install with object storage extras (enables S3 / R2 backend)
+pip install -e ".[dev,storage]"
+
 make test      # run pytest
 make lint      # ruff check
 make format    # ruff format
 make smoke     # run only smoke tests (requires ffmpeg)
 ```
+
+## Storage backends
+
+MotionState uses a swappable storage abstraction so the same artifact pipeline
+works on a local dev machine and in a cloud deployment.
+
+### Local backend (default)
+
+The default backend writes all artifacts directly to the local filesystem under
+the directory configured by `ARTIFACTS_DIR` (default: `./data/artifacts`).
+No additional dependencies are needed.
+
+```bash
+STORAGE_BACKEND=local   # the default; no extra config required
+```
+
+### S3 / Cloudflare R2 backend
+
+Set `STORAGE_BACKEND=s3` and supply bucket credentials.  The backend uses
+[boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) and
+is compatible with AWS S3 and Cloudflare R2 (via `S3_ENDPOINT_URL`).
+
+```bash
+pip install -e ".[storage]"   # or: pip install boto3
+
+STORAGE_BACKEND=s3
+S3_BUCKET=my-motionstate-bucket
+S3_REGION=auto                # use "auto" for R2; or an AWS region such as "us-east-1"
+S3_ENDPOINT_URL=https://<account-id>.r2.cloudflarestorage.com   # R2 only; omit for AWS
+S3_ACCESS_KEY_ID=<key-id>
+S3_SECRET_ACCESS_KEY=<secret>
+SIGNED_URL_EXPIRATION_SECONDS=3600
+```
+
+#### Canonical object keys
+
+All artifacts use a stable, human-readable key layout in the bucket:
+
+| Artifact | Key |
+|----------|-----|
+| Uploaded source video | `videos/{video_id}/source.mp4` |
+| Normalized video | `videos/{video_id}/normalized.mp4` |
+| State summary | `artifacts/{video_id}/state.json` |
+| Detections | `artifacts/{video_id}/detections.json` |
+| Tracks | `artifacts/{video_id}/tracks.json` |
+| Poses | `artifacts/{video_id}/poses.json` |
+| Features | `artifacts/{video_id}/features.json` |
+| Segments | `artifacts/{video_id}/segments.json` |
+| Timeline manifest | `artifacts/{video_id}/timeline_manifest.json` |
+| Segment clips | `artifacts/{video_id}/clips/segment_NNN_<label>.mp4` |
+
+The `Artifact.path` DB column stores the canonical key so artifact reads are
+routed through the same storage backend regardless of which backend is active.
+
+### Direct upload flow (`POST /videos/upload-init`)
+
+For production deployments the client should upload the source video directly
+to object storage instead of streaming through the API server.
+
+1. Client calls `POST /videos/upload-init` with `{"filename": "game.mp4"}`.
+2. API creates a pending `Video` row, generates a canonical storage key, and
+   returns a pre-signed `PUT` URL (S3/R2 only; `null` for local backend).
+3. Client uploads the file directly to the signed URL.
+4. Client enqueues / triggers processing through the regular job queue.
+
+```json
+POST /videos/upload-init
+{"filename": "game.mp4"}
+
+→ 201
+{
+  "video_id": 42,
+  "upload_url": "https://bucket.r2.cloudflarestorage.com/videos/42/source.mp4?…",
+  "storage_key": "videos/42/source.mp4"
+}
+```
+
+`upload_url` is `null` for the local backend — fall back to `POST /videos`
+(multipart upload through the API server) for local development.
+
+### What remains out of scope for storage
+
+- Pre-signed *download* URLs are not yet exposed as an API endpoint (the
+  `S3Storage.generate_download_url()` method exists but is not wired to a route).
+- CDN / caching configuration for object storage is not managed by this repo.
+- Lifecycle / retention policies for the S3 bucket are out of scope.
 
 ## Smoke test
 
@@ -134,6 +231,7 @@ fixture video at `tests/fixtures/fixture.mp4`.
 | Base (default) | `pip install -e .` | API, worker with stub detector/tracker/pose, tests — no heavy deps |
 | Vision extras | `pip install -e ".[vision]"` | Enable the real YOLOv8 detector path |
 | Pose extras | `pip install -e ".[pose]"` | Enable the real MediaPipe pose estimation path |
+| Storage extras | `pip install -e ".[storage]"` | Enable the S3 / R2 storage backend (`STORAGE_BACKEND=s3`) |
 
 The default install works without any CV packages.  Only install the `vision`
 extras if you intend to run `DETECTOR_BACKEND=yolo`, and the `pose` extras if
@@ -185,6 +283,13 @@ Key settings (see `.env.example` for the full list):
 | `TRACKER_MAX_AGE` | `30` | Frames a track can go undetected before being dropped |
 | `POSE_BACKEND` | `stub` | `stub` (no-op) or `mediapipe` (MediaPipe BlazePose) |
 | `POSE_MIN_CONFIDENCE` | `0.3` | Minimum landmark visibility score to include a keypoint |
+| `STORAGE_BACKEND` | `local` | `local` (filesystem) or `s3` (AWS S3 / Cloudflare R2) |
+| `S3_BUCKET` | `` | S3/R2 bucket name (only when `STORAGE_BACKEND=s3`) |
+| `S3_REGION` | `` | AWS region or `auto` for R2 (only when `STORAGE_BACKEND=s3`) |
+| `S3_ENDPOINT_URL` | `` | Custom endpoint for R2 or MinIO (only when `STORAGE_BACKEND=s3`) |
+| `S3_ACCESS_KEY_ID` | `` | S3/R2 access key (only when `STORAGE_BACKEND=s3`) |
+| `S3_SECRET_ACCESS_KEY` | `` | S3/R2 secret key (only when `STORAGE_BACKEND=s3`) |
+| `SIGNED_URL_EXPIRATION_SECONDS` | `3600` | Expiry for pre-signed upload URLs (only when `STORAGE_BACKEND=s3`) |
 
 To enable YOLOv8 detection:
 ```bash
