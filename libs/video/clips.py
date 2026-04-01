@@ -10,6 +10,8 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+_FFMPEG_TIMEOUT_SECONDS = 300
+
 
 def generate_clip(
     video_path: str | Path,
@@ -49,7 +51,7 @@ def generate_clip(
         cmd,
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=_FFMPEG_TIMEOUT_SECONDS,
     )
     if result.returncode != 0:
         raise subprocess.CalledProcessError(

@@ -170,6 +170,10 @@ async def handle_process_video(message: dict) -> None:
             base = str(artifact_dir)
             total_clip_duration_ms = sum(c["end_ms"] - c["start_ms"] for c in clips_info)
             manifest_path = artifact_dir / "timeline_manifest.json"
+            # Build a confidence lookup keyed by segment index for safe retrieval.
+            confidence_by_index = {
+                i: s.get("confidence", 1.0) for i, s in enumerate(segments["segments"])
+            }
             manifest = {
                 "video_id": str(video_id),
                 "version": 1,
@@ -188,9 +192,7 @@ async def handle_process_video(message: dict) -> None:
                         "start_ms": seg["start_ms"],
                         "end_ms": seg["end_ms"],
                         "label": seg["label"],
-                        "confidence": segments["segments"][seg["segment_index"]].get(
-                            "confidence", 1.0
-                        ),
+                        "confidence": confidence_by_index.get(seg["segment_index"], 1.0),
                         "clip_path": seg["path"],
                         "related_artifacts": {
                             "segments": f"{base}/segments.json",
