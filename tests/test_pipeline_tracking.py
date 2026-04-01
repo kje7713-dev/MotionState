@@ -198,17 +198,23 @@ class TestPersistentTrackIDs:
 class TestStateSummaryTracking:
     def test_state_version_is_four(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         assert state["version"] == 7
 
     def test_state_has_tracking_summary_key(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         assert "tracking_summary" in state
 
     def test_tracking_summary_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         ts = state["tracking_summary"]
         for key in ("track_count", "tracked_frame_count", "average_detections_per_frame"):
             assert key in ts, f"tracking_summary missing key: {key}"
@@ -235,7 +241,9 @@ class TestStateSummaryTracking:
 
     def test_state_notes_mention_tracking(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         assert "tracking" in state["notes"]
 
     def test_state_tracks_field_matches_tracks_artifact(self, tmp_path):
