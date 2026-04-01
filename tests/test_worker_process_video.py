@@ -106,13 +106,28 @@ def _make_mock_db(tmp_path, *, video_id: int = 1, job_id: int = 1):
     fake_job.id = job_id
     fake_job.status = None
     fake_job.error = None
+    fake_job.processing_run_id = 1
+
+    fake_run = MagicMock()
+    fake_run.id = 1
+    fake_run.status = None
+    fake_run.error = None
+    fake_run.started_at = None
+    fake_run.completed_at = None
+    fake_run.pipeline_version = None
 
     added_objects: list = []
 
+    def _get_side_effect(model, pk):
+        name = model.__name__
+        if name == "Job":
+            return fake_job
+        if name == "ProcessingRun":
+            return fake_run
+        return fake_video
+
     mock_db = AsyncMock()
-    mock_db.get = AsyncMock(
-        side_effect=lambda model, pk: fake_job if model.__name__ == "Job" else fake_video
-    )
+    mock_db.get = AsyncMock(side_effect=_get_side_effect)
     mock_db.add = MagicMock(side_effect=lambda obj: added_objects.append(obj))
     mock_db.commit = AsyncMock()
     mock_db.__aenter__ = AsyncMock(return_value=mock_db)
