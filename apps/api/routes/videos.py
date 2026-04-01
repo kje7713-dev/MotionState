@@ -9,10 +9,19 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from libs.artifacts import get_latest_artifact, read_artifact_json
 from libs.config import settings
 from libs.db import get_db
 from libs.models import Artifact, Job, JobStatus, JobType, Video, VideoStatus
 from libs.queue import enqueue
+from libs.schemas import (
+    DetectionsArtifact,
+    FeaturesArtifact,
+    PosesArtifact,
+    SegmentsArtifact,
+    StateArtifact,
+    TracksArtifact,
+)
 
 router = APIRouter()
 
@@ -138,13 +147,7 @@ async def get_timeline(
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    result = await db.execute(
-        select(Artifact).where(
-            Artifact.video_id == video_id,
-            Artifact.type == "timeline_manifest",
-        )
-    )
-    artifact = result.scalars().first()
+    artifact = await get_latest_artifact(db, video_id, "timeline_manifest")
     if artifact is None:
         raise HTTPException(status_code=404, detail="Timeline manifest not found")
 
@@ -152,4 +155,124 @@ async def get_timeline(
     if not manifest_file.exists():
         raise HTTPException(status_code=404, detail="Timeline manifest file not found")
 
-    return json.loads(manifest_file.read_text())
+    async with aiofiles.open(manifest_file) as fh:
+        content = await fh.read()
+    return json.loads(content)
+
+
+# ---------------------------------------------------------------------------
+# Artifact-type read helpers
+# ---------------------------------------------------------------------------
+
+
+async def _get_artifact_content(
+    db: AsyncSession,
+    video_id: int,
+    artifact_type: str,
+    not_found_detail: str,
+) -> dict:
+    """Shared implementation for single-artifact read endpoints.
+
+    Raises ``HTTPException`` 404 for missing video, missing artifact row, path
+    outside ``settings.artifacts_dir``, or missing file on disk.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    artifact = await get_latest_artifact(db, video_id, artifact_type)
+    if artifact is None:
+        raise HTTPException(status_code=404, detail=not_found_detail)
+
+    try:
+        return await read_artifact_json(artifact.path)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Artifact path is invalid") from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Artifact file not found") from exc
+
+
+@router.get("/{video_id}/state", response_model=StateArtifact)
+async def get_state(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> StateArtifact:
+    """Return the latest ``state.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(db, video_id, "state", "State artifact not found")
+    return StateArtifact(**data)
+
+
+@router.get("/{video_id}/detections", response_model=DetectionsArtifact)
+async def get_detections(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> DetectionsArtifact:
+    """Return the latest ``detections.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(
+        db, video_id, "detections", "Detections artifact not found"
+    )
+    return DetectionsArtifact(**data)
+
+
+@router.get("/{video_id}/tracks", response_model=TracksArtifact)
+async def get_tracks(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> TracksArtifact:
+    """Return the latest ``tracks.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(db, video_id, "tracks", "Tracks artifact not found")
+    return TracksArtifact(**data)
+
+
+@router.get("/{video_id}/poses", response_model=PosesArtifact)
+async def get_poses(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> PosesArtifact:
+    """Return the latest ``poses.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(db, video_id, "poses", "Poses artifact not found")
+    return PosesArtifact(**data)
+
+
+@router.get("/{video_id}/features", response_model=FeaturesArtifact)
+async def get_features(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> FeaturesArtifact:
+    """Return the latest ``features.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(db, video_id, "features", "Features artifact not found")
+    return FeaturesArtifact(**data)
+
+
+@router.get("/{video_id}/segments", response_model=SegmentsArtifact)
+async def get_segments(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> SegmentsArtifact:
+    """Return the latest ``segments.json`` artifact for a video.
+
+    Raises:
+        HTTPException 404: if the video, artifact row, or file is missing.
+    """
+    data = await _get_artifact_content(db, video_id, "segments", "Segments artifact not found")
+    return SegmentsArtifact(**data)

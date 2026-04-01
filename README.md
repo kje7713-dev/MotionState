@@ -65,6 +65,12 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | GET | `/videos/{video_id}` | Get video status |
 | GET | `/videos/{video_id}/artifacts` | List artifact records for a video |
 | GET | `/videos/{video_id}/timeline` | Return the parsed timeline manifest |
+| GET | `/videos/{video_id}/state` | Return the latest `state.json` artifact |
+| GET | `/videos/{video_id}/detections` | Return the latest `detections.json` artifact |
+| GET | `/videos/{video_id}/tracks` | Return the latest `tracks.json` artifact |
+| GET | `/videos/{video_id}/poses` | Return the latest `poses.json` artifact |
+| GET | `/videos/{video_id}/features` | Return the latest `features.json` artifact |
+| GET | `/videos/{video_id}/segments` | Return the latest `segments.json` artifact |
 | GET | `/jobs/{job_id}` | Get job status |
 
 ## Development
@@ -401,7 +407,42 @@ the worker logs a warning and falls back to the stub detector automatically — 
 }
 ```
 
-## Next steps
+## Consumption API
 
-1. Schema hardening for queryable state output
-2. Optional ontology layers on top
+MotionState exposes read endpoints so downstream systems can query the latest artifact for any processing stage without having to locate files manually.
+
+### Artifact retrieval endpoints
+
+| Endpoint | Returns |
+|----------|---------|
+| `GET /videos/{video_id}/state` | Latest `state.json` — pipeline summary with detection, tracking, pose, feature, segmentation, and clip summaries |
+| `GET /videos/{video_id}/detections` | Latest `detections.json` — per-frame bounding boxes |
+| `GET /videos/{video_id}/tracks` | Latest `tracks.json` — persistent multi-frame track histories |
+| `GET /videos/{video_id}/poses` | Latest `poses.json` — per-frame body keypoints |
+| `GET /videos/{video_id}/features` | Latest `features.json` — derived scalar motion features |
+| `GET /videos/{video_id}/segments` | Latest `segments.json` — temporal segments with labels and confidence scores |
+| `GET /videos/{video_id}/timeline` | Latest `timeline_manifest.json` — full manifest tying all artifacts together |
+| `GET /videos/{video_id}/artifacts` | All artifact metadata rows for the video |
+
+All single-artifact endpoints:
+- Return the **most recently created** artifact of that type (deterministic: ordered by `Artifact.id DESC`).
+- Validate that the stored file path is inside `ARTIFACTS_DIR` before reading.
+- Return `404` if the video is missing, if no artifact row exists, or if the file on disk cannot be found.
+- Return `404` if the stored path escapes the configured `ARTIFACTS_DIR`.
+
+### Schema stability
+
+Artifact schemas are versioned. Each artifact JSON file carries a `version` integer at the top level. Version constants are defined in `libs/schemas.py` and are the canonical reference for downstream consumers:
+
+| Artifact | Current version |
+|----------|----------------|
+| `state.json` | 7 |
+| `detections.json` | 1 |
+| `tracks.json` | 1 |
+| `poses.json` | 1 |
+| `features.json` | 1 |
+| `segments.json` | 1 |
+| `timeline_manifest.json` | 1 |
+
+Downstream consumers should rely on the versioned schemas. When a schema changes incompatibly, the version number will be incremented.
+
