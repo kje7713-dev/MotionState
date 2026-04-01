@@ -72,13 +72,15 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | POST | `/videos/upload-init` | Prepare a direct-to-storage upload; returns signed upload URL |
 | GET | `/videos/{video_id}` | Get video status |
 | GET | `/videos/{video_id}/artifacts` | List artifact records for a video |
-| GET | `/videos/{video_id}/timeline` | Return the parsed timeline manifest |
-| GET | `/videos/{video_id}/state` | Return the latest `state.json` artifact |
-| GET | `/videos/{video_id}/detections` | Return the latest `detections.json` artifact |
-| GET | `/videos/{video_id}/tracks` | Return the latest `tracks.json` artifact |
-| GET | `/videos/{video_id}/poses` | Return the latest `poses.json` artifact |
-| GET | `/videos/{video_id}/features` | Return the latest `features.json` artifact |
-| GET | `/videos/{video_id}/segments` | Return the latest `segments.json` artifact |
+| GET | `/videos/{video_id}/runs` | List all processing runs for a video (newest first) |
+| POST | `/videos/{video_id}/reprocess` | Create a new processing run and enqueue reprocessing |
+| GET | `/videos/{video_id}/timeline` | Return the timeline manifest (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/state` | Return the `state.json` artifact (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/detections` | Return the `detections.json` artifact (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/tracks` | Return the `tracks.json` artifact (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/poses` | Return the `poses.json` artifact (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/features` | Return the `features.json` artifact (latest run, or `?run_id=N`) |
+| GET | `/videos/{video_id}/segments` | Return the `segments.json` artifact (latest run, or `?run_id=N`) |
 | GET | `/jobs/{job_id}` | Get job status |
 
 ## Development
@@ -187,6 +189,85 @@ POST /videos/upload-init
   `S3Storage.generate_download_url()` method exists but is not wired to a route).
 - CDN / caching configuration for object storage is not managed by this repo.
 - Lifecycle / retention policies for the S3 bucket are out of scope.
+
+## Processing runs
+
+Every time a video is processed (or reprocessed) the system creates a
+**`ProcessingRun`** row that acts as the lineage anchor for that execution.
+Jobs and artifacts are linked to the run that produced them.
+
+### One video → many runs
+
+```
+video (id=42)
+  └── ProcessingRun id=1  (trigger=initial,   status=completed)
+        ├── Job id=7        (type=process_video, status=done)
+        └── Artifacts: state, detections, tracks, poses, features, segments, clips…
+  └── ProcessingRun id=2  (trigger=reprocess,  status=completed)
+        ├── Job id=15       (type=process_video, status=done)
+        └── Artifacts: state, detections, tracks, poses, features, segments, clips…
+```
+
+### Default read behaviour
+
+All artifact read endpoints (`/state`, `/detections`, `/tracks`, etc.) resolve
+to the **latest completed run** for that video when no `run_id` is provided:
+
+```
+GET /videos/42/state           → artifacts from the most recently completed run
+GET /videos/42/state?run_id=1  → artifacts from ProcessingRun id=1 specifically
+```
+
+Failed runs are excluded from the "latest successful run" resolution, so a
+failed reprocessing attempt never overwrites what downstream consumers see.
+
+### Listing runs
+
+```
+GET /videos/{video_id}/runs
+```
+
+Returns all runs for a video, newest first:
+
+```json
+[
+  {
+    "id": 2,
+    "status": "completed",
+    "trigger_type": "reprocess",
+    "pipeline_version": "7",
+    "created_at": "2024-01-02T00:00:00Z",
+    "completed_at": "2024-01-02T00:01:00Z",
+    "error": null
+  },
+  {
+    "id": 1,
+    "status": "completed",
+    "trigger_type": "initial",
+    "pipeline_version": "7",
+    "created_at": "2024-01-01T00:00:00Z",
+    "completed_at": "2024-01-01T00:01:00Z",
+    "error": null
+  }
+]
+```
+
+### Triggering a reprocess
+
+```
+POST /videos/{video_id}/reprocess
+```
+
+Creates a **new** `ProcessingRun` and enqueues a new `process_video` job.
+Previous runs and their artifacts are preserved unchanged.
+
+```json
+{
+  "video_id": 42,
+  "processing_run_id": 2,
+  "job_id": 15
+}
+```
 
 ## Smoke test
 

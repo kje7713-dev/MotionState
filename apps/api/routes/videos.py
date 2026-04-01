@@ -5,14 +5,24 @@ import uuid
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.artifacts import get_latest_artifact, read_artifact_json
 from libs.config import settings
 from libs.db import get_db
-from libs.models import Artifact, Job, JobStatus, JobType, Video, VideoStatus
+from libs.models import (
+    Artifact,
+    Job,
+    JobStatus,
+    JobType,
+    ProcessingRun,
+    RunStatus,
+    TriggerType,
+    Video,
+    VideoStatus,
+)
 from libs.queue import enqueue
 from libs.schemas import (
     DetectionsArtifact,
@@ -59,11 +69,25 @@ async def upload_video(
         source_path=str(dest_path),
     )
     db.add(video)
-    await db.flush()  # populate video.id before creating the Job
+    await db.flush()  # populate video.id before creating the ProcessingRun
+
+    # Create a ProcessingRun for lineage tracking.
+    run = ProcessingRun(
+        video_id=video.id,
+        status=RunStatus.pending,
+        trigger_type=TriggerType.initial,
+        detector_backend=settings.detector_backend,
+        tracker_backend=settings.tracker_backend,
+        pose_backend=settings.pose_backend,
+        storage_backend=settings.storage_backend,
+    )
+    db.add(run)
+    await db.flush()  # populate run.id before creating the Job
 
     # Persist the Job row.
     job = Job(
         video_id=video.id,
+        processing_run_id=run.id,
         type=JobType.process_video,
         status=JobStatus.queued,
     )
@@ -73,7 +97,7 @@ async def upload_video(
     # Enqueue the job in Redis.
     await enqueue(job.id, JobType.process_video.value, {"video_id": video.id})
 
-    return {"video_id": video.id, "job_id": job.id}
+    return {"video_id": video.id, "job_id": job.id, "processing_run_id": run.id}
 
 
 @router.post("/upload-init", status_code=201)
@@ -200,12 +224,15 @@ async def list_artifacts(
 @router.get("/{video_id}/timeline")
 async def get_timeline(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Return the parsed timeline manifest for a video.
 
     The manifest ties all pipeline artifacts together with a per-segment
     timeline that references clip paths and related artifact files.
+
+    If *run_id* is omitted the latest successful run is used.
 
     Returns:
         The parsed ``timeline_manifest.json`` contents.
@@ -218,7 +245,7 @@ async def get_timeline(
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    artifact = await get_latest_artifact(db, video_id, "timeline_manifest")
+    artifact = await get_latest_artifact(db, video_id, "timeline_manifest", run_id=run_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail="Timeline manifest not found")
 
@@ -265,6 +292,7 @@ async def _get_artifact_content(
     video_id: int,
     artifact_type: str,
     not_found_detail: str,
+    run_id: int | None = None,
 ) -> dict:
     """Shared implementation for single-artifact read endpoints.
 
@@ -275,7 +303,7 @@ async def _get_artifact_content(
     if video is None:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    artifact = await get_latest_artifact(db, video_id, artifact_type)
+    artifact = await get_latest_artifact(db, video_id, artifact_type, run_id=run_id)
     if artifact is None:
         raise HTTPException(status_code=404, detail=not_found_detail)
 
@@ -290,29 +318,37 @@ async def _get_artifact_content(
 @router.get("/{video_id}/state", response_model=StateArtifact)
 async def get_state(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> StateArtifact:
     """Return the latest ``state.json`` artifact for a video.
 
+    If *run_id* is omitted the latest successful run is used.
+
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
-    data = await _get_artifact_content(db, video_id, "state", "State artifact not found")
+    data = await _get_artifact_content(
+        db, video_id, "state", "State artifact not found", run_id=run_id
+    )
     return StateArtifact(**data)
 
 
 @router.get("/{video_id}/detections", response_model=DetectionsArtifact)
 async def get_detections(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> DetectionsArtifact:
     """Return the latest ``detections.json`` artifact for a video.
+
+    If *run_id* is omitted the latest successful run is used.
 
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "detections", "Detections artifact not found"
+        db, video_id, "detections", "Detections artifact not found", run_id=run_id
     )
     return DetectionsArtifact(**data)
 
@@ -320,55 +356,173 @@ async def get_detections(
 @router.get("/{video_id}/tracks", response_model=TracksArtifact)
 async def get_tracks(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> TracksArtifact:
     """Return the latest ``tracks.json`` artifact for a video.
 
+    If *run_id* is omitted the latest successful run is used.
+
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
-    data = await _get_artifact_content(db, video_id, "tracks", "Tracks artifact not found")
+    data = await _get_artifact_content(
+        db, video_id, "tracks", "Tracks artifact not found", run_id=run_id
+    )
     return TracksArtifact(**data)
 
 
 @router.get("/{video_id}/poses", response_model=PosesArtifact)
 async def get_poses(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> PosesArtifact:
     """Return the latest ``poses.json`` artifact for a video.
 
+    If *run_id* is omitted the latest successful run is used.
+
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
-    data = await _get_artifact_content(db, video_id, "poses", "Poses artifact not found")
+    data = await _get_artifact_content(
+        db, video_id, "poses", "Poses artifact not found", run_id=run_id
+    )
     return PosesArtifact(**data)
 
 
 @router.get("/{video_id}/features", response_model=FeaturesArtifact)
 async def get_features(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> FeaturesArtifact:
     """Return the latest ``features.json`` artifact for a video.
 
+    If *run_id* is omitted the latest successful run is used.
+
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
-    data = await _get_artifact_content(db, video_id, "features", "Features artifact not found")
+    data = await _get_artifact_content(
+        db, video_id, "features", "Features artifact not found", run_id=run_id
+    )
     return FeaturesArtifact(**data)
 
 
 @router.get("/{video_id}/segments", response_model=SegmentsArtifact)
 async def get_segments(
     video_id: int,
+    run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
 ) -> SegmentsArtifact:
     """Return the latest ``segments.json`` artifact for a video.
 
+    If *run_id* is omitted the latest successful run is used.
+
     Raises:
         HTTPException 404: if the video, artifact row, or file is missing.
     """
-    data = await _get_artifact_content(db, video_id, "segments", "Segments artifact not found")
+    data = await _get_artifact_content(
+        db, video_id, "segments", "Segments artifact not found", run_id=run_id
+    )
     return SegmentsArtifact(**data)
+
+
+# ---------------------------------------------------------------------------
+# Processing-run endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{video_id}/runs")
+async def list_runs(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    """Return all processing runs for a video, newest first.
+
+    Each entry contains:
+    - ``id``
+    - ``status``
+    - ``trigger_type``
+    - ``pipeline_version``
+    - ``created_at``
+    - ``completed_at``
+    - ``error``
+
+    Raises:
+        HTTPException 404: if the video does not exist.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    result = await db.execute(
+        select(ProcessingRun)
+        .where(ProcessingRun.video_id == video_id)
+        .order_by(ProcessingRun.id.desc())
+    )
+    runs = result.scalars().all()
+
+    return [
+        {
+            "id": r.id,
+            "status": r.status,
+            "trigger_type": r.trigger_type,
+            "pipeline_version": r.pipeline_version,
+            "created_at": r.created_at,
+            "completed_at": r.completed_at,
+            "error": r.error,
+        }
+        for r in runs
+    ]
+
+
+@router.post("/{video_id}/reprocess", status_code=201)
+async def reprocess_video(
+    video_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Create a new processing run and enqueue a reprocessing job for a video.
+
+    This endpoint is idempotent with respect to lineage: it always creates a
+    **new** :class:`~libs.models.ProcessingRun` row so that artifacts from
+    previous runs are never overwritten.
+
+    Returns:
+        ``{"video_id": int, "processing_run_id": int, "job_id": int}``
+
+    Raises:
+        HTTPException 404: if the video does not exist.
+    """
+    video = await db.get(Video, video_id)
+    if video is None:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+    # Create a new run for lineage tracking.
+    run = ProcessingRun(
+        video_id=video_id,
+        status=RunStatus.pending,
+        trigger_type=TriggerType.reprocess,
+        detector_backend=settings.detector_backend,
+        tracker_backend=settings.tracker_backend,
+        pose_backend=settings.pose_backend,
+        storage_backend=settings.storage_backend,
+    )
+    db.add(run)
+    await db.flush()  # populate run.id
+
+    # Create a new job linked to this run.
+    job = Job(
+        video_id=video_id,
+        processing_run_id=run.id,
+        type=JobType.process_video,
+        status=JobStatus.queued,
+    )
+    db.add(job)
+    await db.flush()  # populate job.id
+
+    await enqueue(job.id, JobType.process_video.value, {"video_id": video_id})
+
+    return {"video_id": video_id, "processing_run_id": run.id, "job_id": job.id}
 

@@ -29,6 +29,18 @@ class JobType(enum.StrEnum):
     process_video = "process_video"
 
 
+class RunStatus(enum.StrEnum):
+    pending = "pending"
+    running = "running"
+    completed = "completed"
+    error = "error"
+
+
+class TriggerType(enum.StrEnum):
+    initial = "initial"
+    reprocess = "reprocess"
+
+
 class Video(Base):
     """Represents an ingested video file and its processing state."""
 
@@ -57,6 +69,53 @@ class Video(Base):
 
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="video")
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="video")
+    processing_runs: Mapped[list["ProcessingRun"]] = relationship(
+        "ProcessingRun", back_populates="video"
+    )
+
+
+class ProcessingRun(Base):
+    """Represents a single processing attempt for a video.
+
+    Each time a video is processed (or reprocessed) a new row is created so
+    that artifact lineage is preserved across runs.  The ``status`` field
+    tracks the lifecycle of the run; ``trigger_type`` records whether this was
+    the initial ingest or an explicit reprocess request.
+    """
+
+    __tablename__ = "processing_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id"), nullable=False)
+    status: Mapped[RunStatus] = mapped_column(
+        Enum(RunStatus), default=RunStatus.pending, nullable=False
+    )
+    trigger_type: Mapped[TriggerType] = mapped_column(
+        Enum(TriggerType), default=TriggerType.initial, nullable=False
+    )
+    pipeline_version: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    detector_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tracker_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pose_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    storage_backend: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    video: Mapped["Video"] = relationship("Video", back_populates="processing_runs")
+    jobs: Mapped[list["Job"]] = relationship("Job", back_populates="processing_run")
+    artifacts: Mapped[list["Artifact"]] = relationship(
+        "Artifact", back_populates="processing_run"
+    )
 
 
 class Job(Base):
@@ -66,6 +125,9 @@ class Job(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id"), nullable=False)
+    processing_run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("processing_runs.id"), nullable=True
+    )
     type: Mapped[JobType] = mapped_column(
         Enum(JobType), default=JobType.process_video, nullable=False
     )
@@ -84,6 +146,9 @@ class Job(Base):
     )
 
     video: Mapped["Video"] = relationship("Video", back_populates="jobs")
+    processing_run: Mapped["ProcessingRun | None"] = relationship(
+        "ProcessingRun", back_populates="jobs"
+    )
 
 
 class Artifact(Base):
@@ -93,6 +158,9 @@ class Artifact(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     video_id: Mapped[int] = mapped_column(Integer, ForeignKey("videos.id"), nullable=False)
+    processing_run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("processing_runs.id"), nullable=True
+    )
     type: Mapped[str] = mapped_column(String(128), nullable=False)
     path: Mapped[str] = mapped_column(Text, nullable=False)
     metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
@@ -101,3 +169,6 @@ class Artifact(Base):
     )
 
     video: Mapped["Video"] = relationship("Video", back_populates="artifacts")
+    processing_run: Mapped["ProcessingRun | None"] = relationship(
+        "ProcessingRun", back_populates="artifacts"
+    )

@@ -6,10 +6,11 @@ Usage pattern:
     content   = await read_artifact_json(artifact.path)
 
 ``get_latest_artifact`` always returns the **most recently created** artifact
-row for a given video + type pair, or ``None`` if no row exists.  When multiple
-rows exist (e.g. a video was re-processed) the latest one is selected by
-ordering on ``Artifact.id DESC`` (which is monotonically increasing and always
-available without a timezone-aware comparison).
+row for a given video + type pair belonging to the latest *completed*
+:class:`~libs.models.ProcessingRun`.  When ``run_id`` is provided the lookup
+is scoped to that specific run.  Falls back to ordering by ``Artifact.id DESC``
+if no completed run exists so that legacy rows without a run association are
+still accessible.
 
 ``read_artifact_json`` routes reads through the configured storage backend:
 
@@ -31,30 +32,93 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.config import settings
-from libs.models import Artifact
+from libs.models import Artifact, ProcessingRun, RunStatus
 from libs.storage import get_storage
+
+
+async def get_latest_run(
+    db: AsyncSession,
+    video_id: int,
+) -> ProcessingRun | None:
+    """Return the most recently completed ProcessingRun for *video_id*.
+
+    Returns the run with the highest ``id`` among those whose status is
+    ``completed``.  Returns ``None`` if no completed run exists.
+
+    Args:
+        db: Active async database session.
+        video_id: Primary key of the video.
+
+    Returns:
+        The latest completed :class:`~libs.models.ProcessingRun`, or ``None``.
+    """
+    result = await db.execute(
+        select(ProcessingRun)
+        .where(
+            ProcessingRun.video_id == video_id,
+            ProcessingRun.status == RunStatus.completed,
+        )
+        .order_by(ProcessingRun.id.desc())
+        .limit(1)
+    )
+    return result.scalars().first()
 
 
 async def get_latest_artifact(
     db: AsyncSession,
     video_id: int,
     artifact_type: str,
+    run_id: int | None = None,
 ) -> Artifact | None:
     """Return the most recently created artifact row for *video_id* / *artifact_type*.
 
-    When multiple rows exist the one with the highest ``id`` is returned (id is
-    auto-incrementing, so the highest id is always the most recently inserted
-    row).
+    When *run_id* is supplied, the result is scoped to that specific run.
+    Otherwise the latest completed :class:`~libs.models.ProcessingRun` is
+    resolved first and the artifact is scoped to that run.  If no completed
+    run exists (e.g. legacy rows without a run association) the fallback
+    selects the artifact with the highest ``id`` regardless of run.
 
     Args:
         db: Active async database session.
         video_id: Primary key of the video.
         artifact_type: Artifact type string, e.g. ``"state"``, ``"detections"``.
+        run_id: Optional processing run ID to scope the lookup.
 
     Returns:
         The latest :class:`~libs.models.Artifact` row, or ``None`` if no row
         exists for this video / type combination.
     """
+    if run_id is not None:
+        result = await db.execute(
+            select(Artifact)
+            .where(
+                Artifact.video_id == video_id,
+                Artifact.type == artifact_type,
+                Artifact.processing_run_id == run_id,
+            )
+            .order_by(Artifact.id.desc())
+            .limit(1)
+        )
+        return result.scalars().first()
+
+    # Try to resolve the latest completed run and scope to it.
+    latest_run = await get_latest_run(db, video_id)
+    if latest_run is not None:
+        result = await db.execute(
+            select(Artifact)
+            .where(
+                Artifact.video_id == video_id,
+                Artifact.type == artifact_type,
+                Artifact.processing_run_id == latest_run.id,
+            )
+            .order_by(Artifact.id.desc())
+            .limit(1)
+        )
+        row = result.scalars().first()
+        if row is not None:
+            return row
+
+    # Fallback: legacy rows with no run association or no completed run yet.
     result = await db.execute(
         select(Artifact)
         .where(Artifact.video_id == video_id, Artifact.type == artifact_type)

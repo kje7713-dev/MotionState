@@ -11,17 +11,18 @@ Steps:
 7. Write timeline_manifest.json tying all artifacts together.
 8. Write state.json, detections.json, tracks.json, poses.json, features.json, segments.json,
    clip files, and timeline_manifest.json artifacts through the configured storage backend.
-9. Create Artifact rows for all files.
-10. Mark job + video as done.
+9. Create Artifact rows for all files, linked to the ProcessingRun.
+10. Mark job + video + ProcessingRun as done.
 """
 
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from libs.config import settings
 from libs.db import AsyncSessionLocal
-from libs.models import Artifact, Job, JobStatus, Video, VideoStatus
+from libs.models import Artifact, Job, JobStatus, ProcessingRun, RunStatus, Video, VideoStatus
 from libs.pipeline.run_pipeline import run_pipeline
 from libs.storage import artifact_key, get_storage, normalized_video_key
 from libs.video.clips import generate_clips
@@ -101,9 +102,17 @@ async def handle_process_video(message: dict) -> None:
             logger.error("Job %s or Video %s not found; skipping.", job_id, video_id)
             return
 
+        # Resolve the ProcessingRun for this job (may be None for legacy jobs).
+        run: ProcessingRun | None = None
+        if job.processing_run_id is not None:
+            run = await db.get(ProcessingRun, job.processing_run_id)
+
         # --- Mark as running ---
         job.status = JobStatus.running
         video.status = VideoStatus.processing
+        if run is not None:
+            run.status = RunStatus.running
+            run.started_at = datetime.now(UTC)
         await db.commit()
 
         try:
@@ -240,10 +249,14 @@ async def handle_process_video(message: dict) -> None:
             state_saved = await _save_json(storage, state_key, state)
             logger.info("State artifact written to %s", state_saved)
 
+            # Helper to build Artifact kwargs with optional run linkage.
+            run_id = run.id if run is not None else None
+
             # --- Persist artifact rows ---
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="state",
                     path=state_saved,
                     metadata_json={"version": state["version"]},
@@ -252,6 +265,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="detections",
                     path=det_saved,
                     metadata_json={
@@ -264,6 +278,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="tracks",
                     path=trk_saved,
                     metadata_json={
@@ -275,6 +290,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="poses",
                     path=poses_saved,
                     metadata_json={
@@ -286,6 +302,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="features",
                     path=feat_saved,
                     metadata_json={
@@ -297,6 +314,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="segments",
                     path=seg_saved,
                     metadata_json={
@@ -309,6 +327,7 @@ async def handle_process_video(message: dict) -> None:
                 db.add(
                     Artifact(
                         video_id=video_id,
+                        processing_run_id=run_id,
                         type="segment_clip",
                         path=clip_saved_paths[i],
                         metadata_json={
@@ -322,6 +341,7 @@ async def handle_process_video(message: dict) -> None:
             db.add(
                 Artifact(
                     video_id=video_id,
+                    processing_run_id=run_id,
                     type="timeline_manifest",
                     path=manifest_saved,
                     metadata_json={"version": manifest["version"]},
@@ -339,6 +359,12 @@ async def handle_process_video(message: dict) -> None:
             # --- Update job ---
             job.status = JobStatus.done
 
+            # --- Update ProcessingRun ---
+            if run is not None:
+                run.status = RunStatus.completed
+                run.completed_at = datetime.now(UTC)
+                run.pipeline_version = str(state.get("version", ""))
+
             await db.commit()
             logger.info("Job %s completed successfully.", job_id)
 
@@ -347,6 +373,10 @@ async def handle_process_video(message: dict) -> None:
             job.status = JobStatus.error
             job.error = str(exc)
             video.status = VideoStatus.error
+            if run is not None:
+                run.status = RunStatus.error
+                run.error = str(exc)
+                run.completed_at = datetime.now(UTC)
             await db.commit()
             raise
 
