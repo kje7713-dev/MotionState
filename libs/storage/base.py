@@ -29,3 +29,17 @@ class StorageBackend(ABC):
     def full_path(self, path: str) -> Path:
         """Return a local filesystem Path for *path* (may be a temp copy for remote backends)."""
         ...
+
+    @abstractmethod
+    async def generate_upload_url(self, key: str, expires_in: int) -> str | None:
+        """Return a pre-signed URL for a direct PUT upload to *key*.
+
+        Returns ``None`` if this backend does not support pre-signed uploads
+        (e.g. local filesystem).  The caller should handle ``None`` by falling
+        back to the regular multipart upload endpoint.
+
+        Args:
+            key: The canonical storage key (e.g. ``videos/1/source.mp4``).
+            expires_in: Seconds until the pre-signed URL expires.
+        """
+        ...

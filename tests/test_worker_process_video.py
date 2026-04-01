@@ -132,6 +132,7 @@ def _patch_settings(mock_settings, tmp_path):
     mock_settings.tracker_max_age = 30
     mock_settings.pose_backend = "stub"
     mock_settings.pose_min_confidence = 0.3
+    mock_settings.storage_backend = "local"
 
 
 # ---------------------------------------------------------------------------

@@ -5,7 +5,7 @@ import uuid
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, Depends, HTTPException, UploadFile
+from fastapi import APIRouter, Body, Depends, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -22,6 +22,7 @@ from libs.schemas import (
     StateArtifact,
     TracksArtifact,
 )
+from libs.storage import get_storage, source_video_key
 
 router = APIRouter()
 
@@ -32,6 +33,10 @@ async def upload_video(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """Accept an uploaded video, persist it, and enqueue a processing job.
+
+    This is the simple multipart-upload path suitable for local development
+    and small files.  For production deployments where clients should upload
+    directly to object storage, use ``POST /videos/upload-init`` instead.
 
     Returns:
         ``{"video_id": int, "job_id": int}``
@@ -69,6 +74,72 @@ async def upload_video(
     await enqueue(job.id, JobType.process_video.value, {"video_id": video.id})
 
     return {"video_id": video.id, "job_id": job.id}
+
+
+@router.post("/upload-init", status_code=201)
+async def upload_init(
+    filename: str = Body(..., embed=True),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Prepare a direct-to-storage upload and return a pre-signed upload URL.
+
+    This is the production-oriented upload path.  Instead of streaming the
+    video through the API server, the client uploads the file directly to
+    the configured object storage backend (S3 / R2) using the returned URL.
+
+    Steps performed by this endpoint:
+
+    1. Create a ``pending`` :class:`~libs.models.Video` row.
+    2. Generate a canonical storage key for the source video.
+    3. For the S3 backend: generate a pre-signed PUT URL the client can use
+       to upload directly to object storage.
+    4. Return the ``video_id``, ``upload_url``, and ``storage_key`` to the
+       client.
+
+    After the client has finished uploading, it should trigger processing
+    via the regular job queue (a separate endpoint or operation).
+
+    Args:
+        filename: Original filename of the video being uploaded.  Used to
+            derive the file extension for the canonical storage key.
+
+    Returns:
+        ``{"video_id": int, "upload_url": str | None, "storage_key": str}``
+
+        ``upload_url`` is ``None`` when the storage backend does not support
+        pre-signed uploads (i.e. the local backend).  In that case fall back
+        to ``POST /videos`` for direct upload through the API server.
+    """
+    suffix = Path(filename).suffix or ".mp4"
+    storage = get_storage()
+
+    # Create a pending video row first so we have a real video_id for the key.
+    video = Video(
+        original_filename=filename,
+        status=VideoStatus.pending,
+        source_path=None,  # will be set after upload completes
+    )
+    db.add(video)
+    await db.flush()  # populate video.id
+
+    key = source_video_key(video.id, ext=suffix)
+
+    # For S3 backend: generate a pre-signed upload URL.
+    # For local backend: returns None (client should use POST /videos instead).
+    upload_url = await storage.generate_upload_url(
+        key, expires_in=settings.signed_url_expiration_seconds
+    )
+
+    # Store the canonical key as the source path so the worker can locate
+    # the uploaded file via the storage backend.
+    video.source_path = key
+    await db.commit()
+
+    return {
+        "video_id": video.id,
+        "upload_url": upload_url,
+        "storage_key": key,
+    }
 
 
 @router.get("/{video_id}")
@@ -141,7 +212,7 @@ async def get_timeline(
 
     Raises:
         HTTPException 404: if the video, the manifest artifact row, or the
-            manifest file on disk cannot be found.
+            manifest file on disk / object key cannot be found.
     """
     video = await db.get(Video, video_id)
     if video is None:
@@ -151,6 +222,17 @@ async def get_timeline(
     if artifact is None:
         raise HTTPException(status_code=404, detail="Timeline manifest not found")
 
+    if settings.storage_backend == "s3":
+        try:
+            storage = get_storage()
+            data = await storage.load(artifact.path)
+            return json.loads(data)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=404, detail="Timeline manifest object not found"
+            ) from exc
+
+    # Local backend: read directly from disk.
     manifest_file = Path(artifact.path)
     if not manifest_file.exists():
         raise HTTPException(status_code=404, detail="Timeline manifest file not found")
@@ -174,7 +256,7 @@ async def _get_artifact_content(
     """Shared implementation for single-artifact read endpoints.
 
     Raises ``HTTPException`` 404 for missing video, missing artifact row, path
-    outside ``settings.artifacts_dir``, or missing file on disk.
+    outside ``settings.artifacts_dir`` (local backend), or missing file / key.
     """
     video = await db.get(Video, video_id)
     if video is None:
@@ -276,3 +358,4 @@ async def get_segments(
     """
     data = await _get_artifact_content(db, video_id, "segments", "Segments artifact not found")
     return SegmentsArtifact(**data)
+

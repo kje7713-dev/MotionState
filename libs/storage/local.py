@@ -35,3 +35,7 @@ class LocalStorage(StorageBackend):
     def full_path(self, path: str) -> Path:
         """Return a Path object for *path*."""
         return Path(path)
+
+    async def generate_upload_url(self, key: str, expires_in: int) -> None:  # type: ignore[override]
+        """Local storage does not support pre-signed upload URLs; always returns None."""
+        return None

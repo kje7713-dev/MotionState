@@ -44,5 +44,17 @@ class Settings(BaseSettings):
     pose_model: str = ""
     pose_min_confidence: float = 0.3
 
+    # Storage backend
+    # Use "local" (default, writes to local filesystem) or "s3" (AWS S3 / Cloudflare R2).
+    storage_backend: str = "local"
+
+    # S3 / R2 config (only used when storage_backend=s3)
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_endpoint_url: str = ""  # set to R2 endpoint for Cloudflare R2
+    s3_access_key_id: str = ""
+    s3_secret_access_key: str = ""
+    signed_url_expiration_seconds: int = 3600
+
 
 settings = Settings()
