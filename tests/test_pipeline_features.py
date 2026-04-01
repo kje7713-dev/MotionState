@@ -250,7 +250,7 @@ class TestStateFeatureSummary:
         state, _, _, _, _, _ = run_pipeline(
             "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
         )
-        assert state["version"] == 6
+        assert state["version"] == 7
 
     def test_state_has_feature_summary_key(self, tmp_path):
         frame = _make_frame(tmp_path, 0)

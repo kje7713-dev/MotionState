@@ -7,10 +7,12 @@ Steps:
 4. Extract frames at configured sample rate.
 5. Run CV pipeline (detector + tracker + pose estimator + feature deriver + segmenter) to produce
    detections, tracks, pose estimates, motion features, and temporal segments.
-6. Write state.json, detections.json, tracks.json, poses.json, features.json, and
-   segments.json artifacts.
-7. Create Artifact rows for all six files.
-8. Mark job + video as done.
+6. Generate MP4 clips for each segment.
+7. Write timeline_manifest.json tying all artifacts together.
+8. Write state.json, detections.json, tracks.json, poses.json, features.json, segments.json,
+   clip files, and timeline_manifest.json artifacts.
+9. Create Artifact rows for all files.
+10. Mark job + video as done.
 """
 
 import json
@@ -21,6 +23,7 @@ from libs.config import settings
 from libs.db import AsyncSessionLocal
 from libs.models import Artifact, Job, JobStatus, Video, VideoStatus
 from libs.pipeline.run_pipeline import run_pipeline
+from libs.video.clips import generate_clips
 from libs.video.ffmpeg import normalize_video, probe_video
 from libs.video.frames import extract_frames
 
@@ -133,11 +136,6 @@ async def handle_process_video(message: dict) -> None:
                 sample_fps=settings.frame_sample_fps,
             )
 
-            # --- Write state artifact ---
-            state_path = artifact_dir / "state.json"
-            state_path.write_text(json.dumps(state, indent=2))
-            logger.info("State artifact written to %s", state_path)
-
             # --- Write detections artifact ---
             detections_path = artifact_dir / "detections.json"
             detections_path.write_text(json.dumps(detections, indent=2))
@@ -162,6 +160,60 @@ async def handle_process_video(message: dict) -> None:
             segments_path = artifact_dir / "segments.json"
             segments_path.write_text(json.dumps(segments, indent=2))
             logger.info("Segments artifact written to %s", segments_path)
+
+            # --- Generate clips ---
+            clips_dir = artifact_dir / "clips"
+            clips_info = generate_clips(norm_path, segments["segments"], clips_dir)
+            logger.info("Generated %d clips for video %s", len(clips_info), video_id)
+
+            # --- Build timeline manifest ---
+            base = str(artifact_dir)
+            total_clip_duration_ms = sum(c["end_ms"] - c["start_ms"] for c in clips_info)
+            manifest_path = artifact_dir / "timeline_manifest.json"
+            # Build a confidence lookup keyed by segment index for safe retrieval.
+            confidence_by_index = {
+                i: s.get("confidence", 1.0) for i, s in enumerate(segments["segments"])
+            }
+            manifest = {
+                "video_id": str(video_id),
+                "version": 1,
+                "duration_seconds": meta["duration_seconds"],
+                "artifacts": {
+                    "state": f"{base}/state.json",
+                    "detections": f"{base}/detections.json",
+                    "tracks": f"{base}/tracks.json",
+                    "poses": f"{base}/poses.json",
+                    "features": f"{base}/features.json",
+                    "segments": f"{base}/segments.json",
+                },
+                "timeline": [
+                    {
+                        "segment_index": seg["segment_index"],
+                        "start_ms": seg["start_ms"],
+                        "end_ms": seg["end_ms"],
+                        "label": seg["label"],
+                        "confidence": confidence_by_index.get(seg["segment_index"], 1.0),
+                        "clip_path": seg["path"],
+                        "related_artifacts": {
+                            "segments": f"{base}/segments.json",
+                            "features": f"{base}/features.json",
+                        },
+                    }
+                    for seg in clips_info
+                ],
+            }
+            manifest_path.write_text(json.dumps(manifest, indent=2))
+            logger.info("Timeline manifest written to %s", manifest_path)
+
+            # --- Update state with clip summary and manifest path ---
+            state["clip_summary"] = {
+                "clip_count": len(clips_info),
+                "total_clip_duration_ms": total_clip_duration_ms,
+            }
+            state["manifest_path"] = str(manifest_path)
+            state_path = artifact_dir / "state.json"
+            state_path.write_text(json.dumps(state, indent=2))
+            logger.info("State artifact written to %s", state_path)
 
             # --- Persist artifact rows ---
             db.add(
@@ -226,6 +278,28 @@ async def handle_process_video(message: dict) -> None:
                         "version": segments["version"],
                         "segment_count": segments["segment_count"],
                     },
+                )
+            )
+            for clip in clips_info:
+                db.add(
+                    Artifact(
+                        video_id=video_id,
+                        type="segment_clip",
+                        path=clip["path"],
+                        metadata_json={
+                            "segment_index": clip["segment_index"],
+                            "label": clip["label"],
+                            "start_ms": clip["start_ms"],
+                            "end_ms": clip["end_ms"],
+                        },
+                    )
+                )
+            db.add(
+                Artifact(
+                    video_id=video_id,
+                    type="timeline_manifest",
+                    path=str(manifest_path),
+                    metadata_json={"version": manifest["version"]},
                 )
             )
 

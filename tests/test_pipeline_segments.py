@@ -126,7 +126,7 @@ class TestStateSegmentationSummary:
     def test_state_version_is_six(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
         state, *_ = run_pipeline("v", frames=[frame], detector=_SinglePersonDetector())
-        assert state["version"] == 6
+        assert state["version"] == 7
 
     def test_state_has_segmentation_summary(self, tmp_path):
         frame = _make_frame(tmp_path, 0)

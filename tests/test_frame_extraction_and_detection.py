@@ -104,7 +104,7 @@ def test_run_pipeline_with_mock_detector_produces_detections(tmp_path):
 
     # State artifact checks
     assert state["video_id"] == "test-123"
-    assert state["version"] == 6
+    assert state["version"] == 7
     assert "placeholder" not in state.get("notes", "")
     summary = state["detections_summary"]
     assert summary["frame_count"] == 1
@@ -190,6 +190,7 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
             "duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720,
         }),
         patch("apps.worker.jobs.process_video.extract_frames", return_value=[]),
+        patch("apps.worker.jobs.process_video.generate_clips", return_value=[]),
         patch(
             "apps.worker.jobs.process_video.run_pipeline",
             return_value=(
@@ -218,13 +219,15 @@ async def test_handle_process_video_creates_both_artifacts(tmp_path):
 
         await handle_process_video({"job_id": 1, "payload": {"video_id": 1}})
 
-    # Six Artifact rows should have been added (state, detections, tracks, poses, features, segments).
+    # Seven Artifact rows should have been added (state, detections, tracks, poses, features,
+    # segments, timeline_manifest).
     from libs.models import Artifact
 
     artifact_rows = [o for o in added_objects if isinstance(o, Artifact)]
-    assert len(artifact_rows) == 6
+    assert len(artifact_rows) == 7
     types = {a.type for a in artifact_rows}
-    assert types == {"state", "detections", "tracks", "poses", "features", "segments"}
+    assert types == {"state", "detections", "tracks", "poses", "features", "segments",
+                     "timeline_manifest"}
 
 
 # ---------------------------------------------------------------------------
