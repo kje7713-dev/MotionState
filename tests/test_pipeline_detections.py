@@ -90,14 +90,18 @@ class TestDetectionsArtifact:
 
     def test_each_frame_entry_has_required_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, det, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        _, det, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         entry = det["frames"][0]
         for key in ("frame_index", "timestamp_ms", "path", "detections"):
             assert key in entry, f"missing key: {key}"
 
     def test_detection_entry_has_class_label_and_bbox(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, det, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        _, det, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         detection = det["frames"][0]["detections"][0]
         assert detection["class_label"] == "person"
         for key in ("x", "y", "width", "height", "confidence"):
@@ -105,7 +109,9 @@ class TestDetectionsArtifact:
 
     def test_artifact_is_json_serialisable(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        _, det, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        _, det, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         dumped = json.dumps(det)
         parsed = json.loads(dumped)
         assert parsed["video_id"] == "v"
@@ -119,17 +125,23 @@ class TestDetectionsArtifact:
 class TestStateSummary:
     def test_frame_count_matches_input(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(4)]
-        state, _, _, _, _, _ = run_pipeline("v", frames=frames, detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=frames, detector=_OnePerson(), sample_fps=2.0
+        )
         assert state["detections_summary"]["frame_count"] == 4
 
     def test_frames_with_people_one_detection_per_frame(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(3)]
-        state, _, _, _, _, _ = run_pipeline("v", frames=frames, detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=frames, detector=_OnePerson(), sample_fps=2.0
+        )
         assert state["detections_summary"]["frames_with_people"] == 3
 
     def test_total_detections_two_per_frame(self, tmp_path):
         frames = [_make_frame(tmp_path, i) for i in range(2)]
-        state, _, _, _, _, _ = run_pipeline("v", frames=frames, detector=_TwoPeople(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=frames, detector=_TwoPeople(), sample_fps=2.0
+        )
         assert state["detections_summary"]["total_detections"] == 4
 
     def test_stub_detector_gives_zero_people(self, tmp_path):
@@ -147,7 +159,9 @@ class TestStateSummary:
 
     def test_state_has_required_top_level_keys(self, tmp_path):
         frame = _make_frame(tmp_path, 0)
-        state, _, _, _, _, _ = run_pipeline("v", frames=[frame], detector=_OnePerson(), sample_fps=2.0)
+        state, _, _, _, _, _ = run_pipeline(
+            "v", frames=[frame], detector=_OnePerson(), sample_fps=2.0
+        )
         for key in ("video_id", "version", "segments", "tracks", "features", "detections_summary"):
             assert key in state, f"state missing key: {key}"
 
