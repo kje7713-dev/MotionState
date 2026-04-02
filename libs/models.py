@@ -65,8 +65,9 @@ class Project(Base):
 class ApiKey(Base):
     """An API key belonging to a project.
 
-    The raw secret is never stored; only a SHA-256 hex digest is kept.
-    The full key is returned exactly once at creation time.
+    The raw secret is never stored; only a salted PBKDF2-HMAC-SHA256-derived value
+    (typically hex-encoded) is kept. The full key is returned exactly once at
+    creation time.
     """
 
     __tablename__ = "api_keys"
