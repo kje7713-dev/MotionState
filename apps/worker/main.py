@@ -3,6 +3,7 @@
 import asyncio
 import logging
 
+from apps.worker.jobs.deliver_webhook import handle_deliver_webhook
 from apps.worker.jobs.process_video import handle_process_video
 from libs.queue import dequeue
 
@@ -11,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 HANDLERS = {
     "process_video": handle_process_video,
+    "deliver_webhook": handle_deliver_webhook,
 }
 
 
