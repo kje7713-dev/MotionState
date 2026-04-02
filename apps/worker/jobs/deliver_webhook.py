@@ -13,8 +13,9 @@ import logging
 from datetime import UTC, datetime
 
 from libs.db import AsyncSessionLocal
-from libs.models import WebhookEndpoint
+from libs.models import UsageEventType, WebhookEndpoint
 from libs.queue import QUEUE_KEY, get_redis
+from libs.usage import emit as emit_usage
 from libs.webhooks import MAX_DELIVERY_ATTEMPTS, deliver_webhook
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,7 @@ async def handle_deliver_webhook(message: dict) -> None:
             retry_count + 1,
         )
         await _update_webhook_timestamp(webhook_id, success=True)
+        await _emit_webhook_usage(webhook_id)
     else:
         logger.warning(
             "Webhook delivery failed: endpoint=%s event_type=%s attempt=%s",
@@ -129,3 +131,22 @@ async def _reenqueue(webhook_id: int, event_payload: dict, retry_count: int) -> 
         await get_redis().rpush(QUEUE_KEY, message)
     except Exception:
         logger.exception("Failed to re-enqueue webhook delivery retry")
+
+
+async def _emit_webhook_usage(webhook_id: int) -> None:
+    """Record a webhook_deliveries usage event for the project that owns the endpoint."""
+    try:
+        async with AsyncSessionLocal() as db:
+            webhook = await db.get(WebhookEndpoint, webhook_id)
+            if webhook is None:
+                return
+            await emit_usage(
+                db,
+                project_id=webhook.project_id,
+                event_type=UsageEventType.webhook_deliveries,
+                quantity=1,
+                metadata={"webhook_id": webhook_id},
+            )
+            await db.commit()
+    except Exception:
+        logger.exception("Failed to emit webhook usage for endpoint %s", webhook_id)

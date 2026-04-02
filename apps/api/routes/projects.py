@@ -1,5 +1,7 @@
 """Project management routes."""
 
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -7,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from libs.auth import generate_api_key
 from libs.db import get_db
 from libs.models import ApiKey, Project
+from libs.usage import monthly_totals, project_usage_summary
 
 router = APIRouter()
 
@@ -134,3 +137,81 @@ async def list_api_keys(
         }
         for k in keys
     ]
+
+
+# ---------------------------------------------------------------------------
+# Usage endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{project_id}/usage")
+async def get_usage(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return a full usage summary for a project.
+
+    Includes current-month totals, all-time totals, and cumulative storage
+    bytes written.
+
+    Raises:
+        HTTPException 404: if the project does not exist.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return await project_usage_summary(db, project_id)
+
+
+@router.get("/{project_id}/usage/current-month")
+async def get_usage_current_month(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return current-calendar-month usage totals for a project.
+
+    Returns a dict of ``{event_type: total_quantity}`` for the current UTC
+    calendar month.
+
+    Raises:
+        HTTPException 404: if the project does not exist.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    now = datetime.now(UTC)
+    totals = await monthly_totals(db, project_id)
+    return {
+        "project_id": project_id,
+        "year": now.year,
+        "month": now.month,
+        "totals": totals,
+    }
+
+
+@router.get("/{project_id}/quotas")
+async def get_quotas(
+    project_id: int,
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Return the current quota configuration for a project.
+
+    All quota fields are ``null`` when no limit is set (i.e. unlimited).
+
+    Raises:
+        HTTPException 404: if the project does not exist.
+    """
+    project = await db.get(Project, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    return {
+        "project_id": project_id,
+        "max_videos_per_month": project.max_videos_per_month,
+        "max_video_seconds_per_month": project.max_video_seconds_per_month,
+        "max_storage_bytes": project.max_storage_bytes,
+        "max_api_reads_per_month": project.max_api_reads_per_month,
+        "is_suspended": project.is_suspended,
+    }

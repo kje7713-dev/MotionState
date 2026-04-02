@@ -12,6 +12,12 @@ def make_fake_project(project_id: int = 1):
     p = MagicMock(spec=Project)
     p.id = project_id
     p.name = "test-project"
+    # Quota fields default to unlimited / not suspended.
+    p.is_suspended = False
+    p.max_videos_per_month = None
+    p.max_video_seconds_per_month = None
+    p.max_storage_bytes = None
+    p.max_api_reads_per_month = None
     return p
 
 

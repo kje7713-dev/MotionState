@@ -24,10 +24,12 @@ from libs.models import (
     Project,
     RunStatus,
     TriggerType,
+    UsageEventType,
     Video,
     VideoStatus,
 )
 from libs.queue import enqueue
+from libs.quotas import check_quota
 from libs.schemas import (
     DetectionsArtifact,
     FeaturesArtifact,
@@ -37,6 +39,7 @@ from libs.schemas import (
     TracksArtifact,
 )
 from libs.storage import get_storage, source_video_key
+from libs.usage import emit as emit_usage
 from libs.webhooks import enqueue_run_event
 
 router = APIRouter()
@@ -60,6 +63,9 @@ async def upload_video(
     """
     upload_dir = Path(settings.upload_dir)
     upload_dir.mkdir(parents=True, exist_ok=True)
+
+    # Quota check before accepting the upload.
+    await check_quota(db, current_project, videos_upload=True)
 
     # Use a UUID filename to avoid collisions while preserving the extension.
     suffix = Path(file.filename or "upload").suffix or ".mp4"
@@ -101,6 +107,15 @@ async def upload_video(
     )
     db.add(job)
     await db.flush()
+
+    # Record upload event.
+    await emit_usage(
+        db,
+        project_id=current_project.id,
+        event_type=UsageEventType.videos_uploaded,
+        quantity=1,
+        processing_run_id=run.id,
+    )
 
     # Enqueue the job in Redis.
     await enqueue(job.id, JobType.process_video.value, {"video_id": video.id})
@@ -159,6 +174,9 @@ async def upload_init(
     suffix = Path(filename).suffix or ".mp4"
     storage = get_storage()
 
+    # Quota check before creating the video row.
+    await check_quota(db, current_project, videos_upload=True)
+
     # Create a pending video row first so we have a real video_id for the key.
     video = Video(
         project_id=current_project.id,
@@ -180,6 +198,15 @@ async def upload_init(
     # Store the canonical key as the source path so the worker can locate
     # the uploaded file via the storage backend.
     video.source_path = key
+
+    # Record upload init event.
+    await emit_usage(
+        db,
+        project_id=current_project.id,
+        event_type=UsageEventType.videos_uploaded,
+        quantity=1,
+    )
+
     await db.commit()
 
     return {
@@ -534,6 +561,9 @@ async def reprocess_video(
     video = await db.get(Video, video_id)
     if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
+
+    # Quota check before allowing reprocess.
+    await check_quota(db, current_project)
 
     # Create a new run for lineage tracking.
     run = ProcessingRun(
