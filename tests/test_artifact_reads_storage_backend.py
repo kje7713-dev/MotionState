@@ -194,7 +194,8 @@ async def test_get_artifact_content_local_returns_parsed_json(tmp_path):
     from unittest.mock import AsyncMock, MagicMock
 
     from apps.api.routes.videos import _get_artifact_content
-    from libs.models import Artifact, Video
+    from libs.models import Artifact, Project, Video
+    from tests.conftest import make_fake_project
 
     path = _write_artifact(tmp_path, 1, "state.json", SAMPLE_STATE)
 
@@ -203,6 +204,9 @@ async def test_get_artifact_content_local_returns_parsed_json(tmp_path):
 
     video = MagicMock(spec=Video)
     video.id = 1
+    video.project_id = 1
+
+    fake_project = make_fake_project(1)
 
     db = AsyncMock()
     db.get = AsyncMock(return_value=video)
@@ -216,7 +220,7 @@ async def test_get_artifact_content_local_returns_parsed_json(tmp_path):
     with patch.object(settings, "storage_backend", "local"), patch.object(
         settings, "artifacts_dir", str(tmp_path)
     ):
-        result = await _get_artifact_content(db, 1, "state", "not found")
+        result = await _get_artifact_content(db, 1, "state", "not found", fake_project)
 
     assert result["version"] == 7
 

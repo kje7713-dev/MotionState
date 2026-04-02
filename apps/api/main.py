@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from apps.api.routes import health, jobs, videos
+from apps.api.routes import health, jobs, projects, videos
 from libs.db import engine
 from libs.models import Base
 
@@ -27,3 +27,4 @@ app = FastAPI(
 app.include_router(health.router)
 app.include_router(videos.router, prefix="/videos", tags=["videos"])
 app.include_router(jobs.router, prefix="/jobs", tags=["jobs"])
+app.include_router(projects.router, prefix="/projects", tags=["projects"])

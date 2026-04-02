@@ -25,7 +25,8 @@
 - No frontend / product UI
 - No domain-specific segment interpretation
 - No ontology / semantic labelling
-- No multi-tenant authentication
+- No OAuth or full user account system
+- No billing
 
 ## Architecture
 
@@ -82,6 +83,77 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | GET | `/videos/{video_id}/features` | Return the `features.json` artifact (latest run, or `?run_id=N`) |
 | GET | `/videos/{video_id}/segments` | Return the `segments.json` artifact (latest run, or `?run_id=N`) |
 | GET | `/jobs/{job_id}` | Get job status |
+| POST | `/projects` | Create a new project (tenancy boundary) |
+| GET | `/projects/{project_id}` | Get project metadata |
+| POST | `/projects/{project_id}/api-keys` | Generate a new API key for a project (raw key returned once) |
+| GET | `/projects/{project_id}/api-keys` | List API keys for a project (without raw key) |
+
+> **All video and job routes require authentication.** See [Authentication](#authentication) below.
+
+## Authentication
+
+MotionState uses API key authentication scoped to **projects**.  A project is
+the ownership boundary: every video, processing run, and artifact belongs to
+exactly one project and is only accessible to API keys from that project.
+
+### Concepts
+
+| Concept | Description |
+|---------|-------------|
+| **Project** | Tenancy boundary. Create one per application or integration. |
+| **API Key** | Opaque secret tied to a project. The raw key is shown **once** at creation and never stored — only its SHA-256 hash is persisted. |
+
+### Setup
+
+**1. Create a project**
+
+```bash
+curl -X POST "http://localhost:8000/projects?name=MyApp"
+# → {"id": 1, "name": "MyApp", "created_at": "..."}
+```
+
+**2. Generate an API key**
+
+```bash
+curl -X POST "http://localhost:8000/projects/1/api-keys?name=production"
+# → {"id": 1, "name": "production", "key": "ms_live_...", "key_prefix": "ms_live_xxxx", "created_at": "..."}
+```
+
+> **Save the `key` value now.** It is returned only once and cannot be retrieved later.
+
+### Using the API key
+
+Pass the key in the `X-API-Key` header:
+
+```bash
+# Upload a video
+curl -X POST "http://localhost:8000/videos" \
+  -H "X-API-Key: ms_live_your_secret_key" \
+  -F "file=@myvideo.mp4"
+
+# Get video status
+curl "http://localhost:8000/videos/1" \
+  -H "X-API-Key: ms_live_your_secret_key"
+
+# Get processed state artifact
+curl "http://localhost:8000/videos/1/state" \
+  -H "X-API-Key: ms_live_your_secret_key"
+```
+
+### Error responses
+
+| Status | Cause |
+|--------|-------|
+| `401 Unauthorized` | Missing, invalid, or inactive API key |
+| `404 Not Found` | Resource does not exist **or belongs to a different project** (cross-project existence is not revealed) |
+
+### Key management
+
+```bash
+# List keys for a project (no raw secrets included)
+curl "http://localhost:8000/projects/1/api-keys" \
+  -H "X-API-Key: ms_live_your_secret_key"
+```
 
 ## Development
 

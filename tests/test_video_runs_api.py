@@ -17,7 +17,10 @@ def app():
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
         from apps.api.main import app as fastapi_app
+        from libs.auth import get_current_project
+        from tests.conftest import make_auth_override
 
+        fastapi_app.dependency_overrides[get_current_project] = make_auth_override()
         yield fastapi_app
 
 
@@ -60,6 +63,7 @@ async def test_list_runs_returns_200_for_existing_video(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     fake_runs = [_make_fake_run(3), _make_fake_run(2), _make_fake_run(1)]
 
@@ -112,6 +116,7 @@ async def test_list_runs_returns_correct_fields(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     fake_runs = [_make_fake_run(5, trigger_type="reprocess"), _make_fake_run(1)]
 
@@ -152,6 +157,7 @@ async def test_list_runs_returns_newest_first(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     # Simulate the DB returning runs newest-first (as the route requests)
     fake_runs = [_make_fake_run(10), _make_fake_run(5), _make_fake_run(1)]
@@ -187,6 +193,7 @@ async def test_list_runs_empty_for_video_with_no_runs(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     mock_scalars = MagicMock()
     mock_scalars.all.return_value = []

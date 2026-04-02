@@ -3,7 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -41,12 +41,59 @@ class TriggerType(enum.StrEnum):
     reprocess = "reprocess"
 
 
+class Project(Base):
+    """Ownership boundary for videos, runs, and API keys."""
+
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="project")
+    videos: Mapped[list["Video"]] = relationship("Video", back_populates="project")
+
+
+class ApiKey(Base):
+    """An API key belonging to a project.
+
+    The raw secret is never stored; only a SHA-256 hex digest is kept.
+    The full key is returned exactly once at creation time.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(Integer, ForeignKey("projects.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(256), nullable=False)
+    key_prefix: Mapped[str] = mapped_column(String(32), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="api_keys")
+
+
 class Video(Base):
     """Represents an ingested video file and its processing state."""
 
     __tablename__ = "videos"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=True, index=True
+    )
     original_filename: Mapped[str] = mapped_column(String(512), nullable=False)
     status: Mapped[VideoStatus] = mapped_column(
         Enum(VideoStatus), default=VideoStatus.pending, nullable=False
@@ -67,6 +114,7 @@ class Video(Base):
         nullable=False,
     )
 
+    project: Mapped["Project | None"] = relationship("Project", back_populates="videos")
     jobs: Mapped[list["Job"]] = relationship("Job", back_populates="video")
     artifacts: Mapped[list["Artifact"]] = relationship("Artifact", back_populates="video")
     processing_runs: Mapped[list["ProcessingRun"]] = relationship(
