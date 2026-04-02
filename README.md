@@ -64,6 +64,48 @@ make dev          # docker compose up --build
 
 Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 
+## Deploy MotionState
+
+> **Full deployment guide:** [`docs/deploy.md`](docs/deploy.md)
+
+One-command bootstrap for local development:
+
+```bash
+# 1. Configure environment
+cp .env.example .env
+# Edit .env: set API_KEY_HMAC_SECRET (openssl rand -hex 32)
+
+# 2. Bootstrap: verify env vars, create dirs, set up DB
+make bootstrap
+
+# Bootstrap + seed a default project and print its API key
+SEED=1 make bootstrap
+
+# 3. Start services
+make dev          # docker compose up --build
+
+# 4. Verify everything is healthy
+make verify-deploy
+```
+
+### Bootstrap targets
+
+| Command | Description |
+|---------|-------------|
+| `make bootstrap` | Local mode — create dirs, set up DB tables, relaxed checks |
+| `SEED=1 make bootstrap` | Same as above, also seeds a default project + API key |
+| `make bootstrap-staging` | Staging mode — fails on insecure defaults |
+| `make verify-deploy` | Hit /health and /admin/health/summary to confirm the service is up |
+
+### Environment templates
+
+| File | Use when |
+|------|---------|
+| `.env.example` | General-purpose starting point |
+| `.env.local.example` | Local dev, local filesystem storage |
+| `.env.s3.example` | S3 / Cloudflare R2 object storage |
+| `.env.webhook-dev.example` | Developing webhook integrations |
+
 ## Python SDK
 
 The `sdk/python/motionstate_client` package is a small official SDK that wraps
