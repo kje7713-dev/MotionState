@@ -26,7 +26,10 @@ def app():
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
         from apps.api.main import app as fastapi_app
+        from libs.auth import get_current_project
+        from tests.conftest import make_auth_override
 
+        fastapi_app.dependency_overrides[get_current_project] = make_auth_override()
         yield fastapi_app
 
 
@@ -86,6 +89,7 @@ async def test_state_without_run_id_uses_latest_successful_run(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     fake_run = MagicMock(spec=ProcessingRun)
     fake_run.id = 42
@@ -144,6 +148,7 @@ async def test_state_with_run_id_returns_specific_run_artifact(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     fake_artifact = MagicMock(spec=Artifact)
     fake_artifact.path = state_path
@@ -193,6 +198,7 @@ async def test_failed_run_does_not_replace_latest_successful_run(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     # Only the completed run is returned by the run query (failed runs are excluded)
     fake_completed_run = MagicMock(spec=ProcessingRun)
@@ -251,6 +257,7 @@ async def test_run_id_query_param_is_accepted(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     fake_artifact = MagicMock(spec=Artifact)
     fake_artifact.path = state_path

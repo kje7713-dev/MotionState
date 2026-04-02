@@ -17,7 +17,10 @@ def app():
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
         from apps.api.main import app as fastapi_app
+        from libs.auth import get_current_project
+        from tests.conftest import make_auth_override
 
+        fastapi_app.dependency_overrides[get_current_project] = make_auth_override()
         yield fastapi_app
 
 
@@ -69,6 +72,7 @@ async def test_returns_200_with_artifacts(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     state_artifact = _make_artifact(1, 1, "state", "/data/1/state.json", {"version": 2})
     det_artifact = _make_artifact(
@@ -94,6 +98,7 @@ async def test_returns_both_artifact_types(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     state_artifact = _make_artifact(1, 1, "state", "/data/1/state.json")
     det_artifact = _make_artifact(2, 1, "detections", "/data/1/detections.json")
@@ -119,6 +124,7 @@ async def test_response_includes_type_path_metadata(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 2
+    fake_video.project_id = 1
 
     meta = {"version": 2, "sample_fps": 2.0}
     artifact = _make_artifact(10, 2, "state", "/data/2/state.json", meta)
@@ -143,6 +149,7 @@ async def test_returns_empty_list_when_no_artifacts(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 3
+    fake_video.project_id = 1
 
     app.dependency_overrides[get_db] = _db_override(video=fake_video, artifacts=[])
 

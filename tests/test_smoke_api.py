@@ -43,7 +43,10 @@ def app():
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
         from apps.api.main import app as fastapi_app
+        from libs.auth import get_current_project
+        from tests.conftest import make_auth_override
 
+        fastapi_app.dependency_overrides[get_current_project] = make_auth_override()
         yield fastapi_app
 
 
@@ -85,6 +88,7 @@ def _make_fake_video(video_id: int = 1):
 
     v = MagicMock(spec=Video)
     v.id = video_id
+    v.project_id = 1
     return v
 
 

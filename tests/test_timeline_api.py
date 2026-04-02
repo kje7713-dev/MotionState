@@ -25,7 +25,10 @@ def app():
         mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
         from apps.api.main import app as fastapi_app
+        from libs.auth import get_current_project
+        from tests.conftest import make_auth_override
 
+        fastapi_app.dependency_overrides[get_current_project] = make_auth_override()
         yield fastapi_app
 
 
@@ -108,6 +111,7 @@ async def test_timeline_returns_200(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     manifest_data = _make_manifest("1")
     manifest_file = tmp_path / "timeline_manifest.json"
@@ -134,6 +138,7 @@ async def test_timeline_response_includes_video_id(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     manifest_data = _make_manifest("1")
     manifest_file = tmp_path / "timeline_manifest.json"
@@ -160,6 +165,7 @@ async def test_timeline_response_includes_timeline_list(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     manifest_data = _make_manifest("1")
     manifest_file = tmp_path / "timeline_manifest.json"
@@ -188,6 +194,7 @@ async def test_timeline_entry_structure(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     manifest_data = _make_manifest("1")
     manifest_file = tmp_path / "timeline_manifest.json"
@@ -221,6 +228,7 @@ async def test_timeline_artifacts_section_present(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     manifest_data = _make_manifest("1")
     manifest_file = tmp_path / "timeline_manifest.json"
@@ -271,6 +279,7 @@ async def test_timeline_returns_404_when_manifest_artifact_not_found(app):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     app.dependency_overrides[get_db] = _db_override_with_manifest(
         video=fake_video, manifest_artifact=None
@@ -292,6 +301,7 @@ async def test_timeline_returns_404_when_manifest_file_missing(app, tmp_path):
 
     fake_video = MagicMock(spec=Video)
     fake_video.id = 1
+    fake_video.project_id = 1
 
     missing_path = str(tmp_path / "nonexistent" / "timeline_manifest.json")
     artifact = _make_manifest_artifact(1, 1, missing_path)

@@ -56,5 +56,10 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = ""
     signed_url_expiration_seconds: int = 3600
 
+    # API key hashing
+    # Server-side HMAC secret used to hash API keys before storing.
+    # Set this to a strong random value in production (e.g. openssl rand -hex 32).
+    api_key_hmac_secret: str = "change-me-in-production"
+
 
 settings = Settings()

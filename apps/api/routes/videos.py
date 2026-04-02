@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from libs.artifacts import get_latest_artifact, read_artifact_json
+from libs.auth import get_current_project
 from libs.config import settings
 from libs.db import get_db
 from libs.models import (
@@ -18,6 +19,7 @@ from libs.models import (
     JobStatus,
     JobType,
     ProcessingRun,
+    Project,
     RunStatus,
     TriggerType,
     Video,
@@ -41,6 +43,7 @@ router = APIRouter()
 async def upload_video(
     file: UploadFile,
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> dict:
     """Accept an uploaded video, persist it, and enqueue a processing job.
 
@@ -64,6 +67,7 @@ async def upload_video(
 
     # Persist the Video row.
     video = Video(
+        project_id=current_project.id,
         original_filename=file.filename or dest_filename,
         status=VideoStatus.pending,
         source_path=str(dest_path),
@@ -104,6 +108,7 @@ async def upload_video(
 async def upload_init(
     filename: str = Body(..., embed=True),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> dict:
     """Prepare a direct-to-storage upload and return a pre-signed upload URL.
 
@@ -139,6 +144,7 @@ async def upload_init(
 
     # Create a pending video row first so we have a real video_id for the key.
     video = Video(
+        project_id=current_project.id,
         original_filename=filename,
         status=VideoStatus.pending,
         source_path=None,  # will be set after upload completes
@@ -170,10 +176,11 @@ async def upload_init(
 async def get_video(
     video_id: int,
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> dict:
     """Return the current state of a video record."""
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     return {
@@ -195,6 +202,7 @@ async def get_video(
 async def list_artifacts(
     video_id: int,
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> list[dict]:
     """Return all artifact records for a video.
 
@@ -202,7 +210,7 @@ async def list_artifacts(
     ``path``, ``metadata_json``, and ``created_at``.
     """
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     result = await db.execute(select(Artifact).where(Artifact.video_id == video_id))
@@ -226,6 +234,7 @@ async def get_timeline(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> dict:
     """Return the parsed timeline manifest for a video.
 
@@ -242,7 +251,7 @@ async def get_timeline(
             manifest file on disk / object key cannot be found.
     """
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     artifact = await get_latest_artifact(db, video_id, "timeline_manifest", run_id=run_id)
@@ -292,15 +301,17 @@ async def _get_artifact_content(
     video_id: int,
     artifact_type: str,
     not_found_detail: str,
+    current_project: Project,
     run_id: int | None = None,
 ) -> dict:
     """Shared implementation for single-artifact read endpoints.
 
-    Raises ``HTTPException`` 404 for missing video, missing artifact row, path
-    outside ``settings.artifacts_dir`` (local backend), or missing file / key.
+    Raises ``HTTPException`` 404 for missing video, cross-project access,
+    missing artifact row, path outside ``settings.artifacts_dir`` (local
+    backend), or missing file / key.
     """
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     artifact = await get_latest_artifact(db, video_id, artifact_type, run_id=run_id)
@@ -320,6 +331,7 @@ async def get_state(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> StateArtifact:
     """Return the latest ``state.json`` artifact for a video.
 
@@ -329,7 +341,7 @@ async def get_state(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "state", "State artifact not found", run_id=run_id
+        db, video_id, "state", "State artifact not found", current_project, run_id=run_id
     )
     return StateArtifact(**data)
 
@@ -339,6 +351,7 @@ async def get_detections(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> DetectionsArtifact:
     """Return the latest ``detections.json`` artifact for a video.
 
@@ -348,7 +361,7 @@ async def get_detections(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "detections", "Detections artifact not found", run_id=run_id
+        db, video_id, "detections", "Detections artifact not found", current_project, run_id=run_id
     )
     return DetectionsArtifact(**data)
 
@@ -358,6 +371,7 @@ async def get_tracks(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> TracksArtifact:
     """Return the latest ``tracks.json`` artifact for a video.
 
@@ -367,7 +381,7 @@ async def get_tracks(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "tracks", "Tracks artifact not found", run_id=run_id
+        db, video_id, "tracks", "Tracks artifact not found", current_project, run_id=run_id
     )
     return TracksArtifact(**data)
 
@@ -377,6 +391,7 @@ async def get_poses(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> PosesArtifact:
     """Return the latest ``poses.json`` artifact for a video.
 
@@ -386,7 +401,7 @@ async def get_poses(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "poses", "Poses artifact not found", run_id=run_id
+        db, video_id, "poses", "Poses artifact not found", current_project, run_id=run_id
     )
     return PosesArtifact(**data)
 
@@ -396,6 +411,7 @@ async def get_features(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> FeaturesArtifact:
     """Return the latest ``features.json`` artifact for a video.
 
@@ -405,7 +421,7 @@ async def get_features(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "features", "Features artifact not found", run_id=run_id
+        db, video_id, "features", "Features artifact not found", current_project, run_id=run_id
     )
     return FeaturesArtifact(**data)
 
@@ -415,6 +431,7 @@ async def get_segments(
     video_id: int,
     run_id: int | None = Query(None, description="Return artifacts from this specific run"),
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> SegmentsArtifact:
     """Return the latest ``segments.json`` artifact for a video.
 
@@ -424,7 +441,7 @@ async def get_segments(
         HTTPException 404: if the video, artifact row, or file is missing.
     """
     data = await _get_artifact_content(
-        db, video_id, "segments", "Segments artifact not found", run_id=run_id
+        db, video_id, "segments", "Segments artifact not found", current_project, run_id=run_id
     )
     return SegmentsArtifact(**data)
 
@@ -438,6 +455,7 @@ async def get_segments(
 async def list_runs(
     video_id: int,
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> list[dict]:
     """Return all processing runs for a video, newest first.
 
@@ -454,7 +472,7 @@ async def list_runs(
         HTTPException 404: if the video does not exist.
     """
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     result = await db.execute(
@@ -482,6 +500,7 @@ async def list_runs(
 async def reprocess_video(
     video_id: int,
     db: AsyncSession = Depends(get_db),
+    current_project: Project = Depends(get_current_project),
 ) -> dict:
     """Create a new processing run and enqueue a reprocessing job for a video.
 
@@ -496,7 +515,7 @@ async def reprocess_video(
         HTTPException 404: if the video does not exist.
     """
     video = await db.get(Video, video_id)
-    if video is None:
+    if video is None or video.project_id != current_project.id:
         raise HTTPException(status_code=404, detail="Video not found")
 
     # Create a new run for lineage tracking.
