@@ -1100,3 +1100,77 @@ Artifact schemas are versioned. Each artifact JSON file carries a `version` inte
 
 Downstream consumers should rely on the versioned schemas. When a schema changes incompatibly, the version number will be incremented.
 
+## Operations / Observability
+
+MotionState includes basic operational visibility for operators who need to understand system health, processing behaviour, failures, and cost-driving activity without grepping through raw logs.
+
+### Admin token
+
+All admin endpoints require an `X-Admin-Token` header.  Set `ADMIN_TOKEN` in your environment (or `.env`) to a strong random string before using any of the endpoints below:
+
+```bash
+ADMIN_TOKEN=$(openssl rand -hex 32)
+```
+
+When `ADMIN_TOKEN` is empty (the default) the admin endpoints return `403` and are effectively disabled.
+
+### Health summary
+
+```
+GET /admin/health/summary
+```
+
+Returns a machine-readable status for each core dependency:
+
+| Field | What it checks |
+|-------|---------------|
+| `app` | Always `"ok"` when the handler responds |
+| `db` | Executes `SELECT NOW()` against Postgres |
+| `redis` | Pings the Redis instance |
+| `storage` | Calls `check_reachable()` on the configured storage backend |
+
+Response example:
+```json
+{
+  "status": "ok",
+  "checks": {
+    "app": "ok",
+    "db": "ok",
+    "redis": "ok",
+    "storage": "ok"
+  },
+  "checked_at": "2024-01-15T10:00:00+00:00"
+}
+```
+
+`"status"` is `"ok"` when all checks pass, or `"degraded"` if any fail.
+
+### Admin visibility endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /admin/runs/recent?limit=20` | Most recent processing runs, newest first. Includes `run_id`, `video_id`, `project_id`, `status`, `started_at`, `completed_at`, `duration_ms`, `error`. |
+| `GET /admin/failures/recent?limit=20` | Errored runs with failure details: `run_id`, `video_id`, `project_id`, `error`, `failed_at`. |
+| `GET /admin/projects/usage/top?limit=10` | Top projects by `video_seconds_processed` in the current calendar month. |
+| `GET /admin/metrics` | JSON metrics summary: run counts by status, average processing duration, all-time usage totals. |
+
+All endpoints accept the `X-Admin-Token` header and return `403` for missing or incorrect tokens.
+
+### Run timing
+
+`ProcessingRun` rows capture:
+- `started_at` — set when the worker picks up the job
+- `completed_at` — set on both success and failure
+- `error` — the exception message on failure
+
+This lets operators calculate per-run duration and pinpoint failure timestamps without log archaeology.
+
+### Structured logging
+
+Key lifecycle events in the worker log structured fields including `project_id`, `video_id`, `processing_run_id`, `job_id`, `status`, and `duration_ms`.  These fields are emitted via Python's standard `logging` `extra=` mechanism so they are captured by any structured log handler (e.g. `python-json-logger`).
+
+### What this is not
+
+This is basic operational visibility, not a full monitoring platform.  There is no Grafana, no Prometheus push, no distributed tracing collector.  Operators who need richer observability can consume the JSON endpoints or attach a structured log aggregator to the worker process.
+
+

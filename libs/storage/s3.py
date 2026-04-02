@@ -154,3 +154,10 @@ class S3Storage(StorageBackend):
             ExpiresIn=expires_in,
         )
         return url
+
+    async def check_reachable(self) -> None:
+        """Confirm that the S3 bucket is accessible by calling head_bucket."""
+        await asyncio.to_thread(
+            self._client.head_bucket,
+            Bucket=self._bucket,
+        )
