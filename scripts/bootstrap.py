@@ -133,11 +133,11 @@ async def run_db_setup() -> None:
 # ---------------------------------------------------------------------------
 
 
-async def seed_project(project_name: str = "default") -> tuple[str, str]:
+async def seed_project(project_name: str = "default") -> str:
     """Create a project and generate one API key.
 
-    Returns (project_name, raw_api_key).
-    The raw key is printed and never stored; it cannot be recovered.
+    Prints the raw API key directly to stdout and returns only the project name.
+    The raw key is shown once and never stored; it cannot be recovered.
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -160,7 +160,23 @@ async def seed_project(project_name: str = "default") -> tuple[str, str]:
             )
             session.add(api_key)
 
-    return project_name, raw_key
+    _display_api_key(raw_key)
+    return project_name
+
+
+def _display_api_key(key: str) -> None:
+    """Write the generated API key to stdout exactly once.
+
+    Displayed as plaintext intentionally — this is the operator bootstrap
+    credential display, equivalent to a one-time secret reveal at creation time.
+    The key is never stored in plaintext; only its PBKDF2 hash is persisted.
+    """
+    print()
+    print("=" * 60)
+    print("  Project API key (save this — shown only once):")
+    print(f"  {key}")  # noqa: S106 — intentional one-time operator display
+    print("=" * 60)
+    print()
 
 
 # ---------------------------------------------------------------------------
@@ -238,14 +254,8 @@ async def bootstrap(mode: str, seed: bool) -> int:
     if seed:
         _info("Seeding default project and API key …")
         try:
-            project_name, raw_key = await seed_project()
+            project_name = await seed_project()
             _info(f"Created project: {project_name!r}")
-            print()
-            print("=" * 60)
-            print("  Project API key (save this — shown only once):")
-            print(f"  {raw_key}")
-            print("=" * 60)
-            print()
         except Exception as exc:
             _warn(f"Seed step failed (project may already exist): {exc}")
 
