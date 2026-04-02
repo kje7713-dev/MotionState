@@ -64,6 +64,139 @@ make dev          # docker compose up --build
 
 Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 
+## Python SDK
+
+The `sdk/python/motionstate_client` package is a small official SDK that wraps
+the REST API so you don't have to stitch raw HTTP calls together manually.
+
+### Installation
+
+```bash
+pip install httpx            # only external dependency
+# then add sdk/python to your PYTHONPATH, or pip install -e sdk/python
+```
+
+### SDK quickstart
+
+```python
+from motionstate_client import MotionStateClient
+
+client = MotionStateClient(
+    base_url="http://localhost:8000",
+    api_key="ms_your_key_here",
+)
+
+# Upload a video and wait for processing to complete.
+upload = client.submit_video("my_video.mp4")
+run = client.wait_for_run_completion(upload.video_id, upload.processing_run_id)
+
+# Fetch all pipeline outputs in one call.
+outputs = client.fetch_latest_outputs(upload.video_id)
+print(outputs["state"]["tracking_summary"])
+```
+
+### Typical workflow
+
+1. **Create a project and API key** (once, via the HTTP API or `curl`):
+
+   ```bash
+   # Create project
+   curl -X POST "http://localhost:8000/projects?name=my-project"
+   # {"id": 1, "name": "my-project", …}
+
+   # Generate API key
+   curl -X POST "http://localhost:8000/projects/1/api-keys?name=dev"
+   # {"key": "ms_…", …}   ← save this, it is shown only once
+   ```
+
+2. **Upload a video** (choose one path):
+
+   ```python
+   # Simple upload (local dev / small files)
+   upload = client.upload_video("clip.mp4")
+
+   # Signed upload (production / large files → direct to S3/R2)
+   init = client.upload_init("clip.mp4")
+   if init.upload_url:
+       import httpx
+       httpx.put(init.upload_url, content=open("clip.mp4", "rb").read())
+       reprocess = client.reprocess_video(init.video_id)
+       run_id = reprocess.processing_run_id
+   ```
+
+3. **Wait for run completion** (polling) or receive a **webhook**:
+
+   ```python
+   # Polling
+   run = client.wait_for_run_completion(video_id, run_id, timeout=300)
+
+   # Webhook (register once)
+   # curl -X POST "http://localhost:8000/projects/1/webhooks" \
+   #      -H "Content-Type: application/json" \
+   #      -d '{"url": "https://your-server.example/hook"}'
+   # The signed payload is delivered when processing_run.completed fires.
+   ```
+
+4. **Fetch outputs**:
+
+   ```python
+   # All available artifacts in one call
+   outputs = client.fetch_latest_outputs(video_id)
+
+   # Or individually
+   state    = client.get_state(video_id)
+   timeline = client.get_timeline(video_id)
+   tracks   = client.get_tracks(video_id)
+   ```
+
+### SDK methods
+
+| Method | Description |
+|--------|-------------|
+| `upload_video(path)` | Multipart upload + enqueue |
+| `submit_video(path)` | Alias for `upload_video` |
+| `upload_init(filename)` | Init signed upload (S3/R2) |
+| `get_video(video_id)` | Video metadata |
+| `list_artifacts(video_id)` | All artifact records |
+| `list_runs(video_id)` | All processing runs |
+| `reprocess_video(video_id)` | Enqueue a new run |
+| `get_state(video_id)` | `state.json` artifact |
+| `get_detections(video_id)` | `detections.json` artifact |
+| `get_tracks(video_id)` | `tracks.json` artifact |
+| `get_poses(video_id)` | `poses.json` artifact |
+| `get_features(video_id)` | `features.json` artifact |
+| `get_segments(video_id)` | `segments.json` artifact |
+| `get_timeline(video_id)` | `timeline_manifest.json` |
+| `get_project_usage(project_id)` | Usage summary |
+| `wait_for_run_completion(…)` | Poll until terminal status |
+| `fetch_latest_outputs(video_id)` | All artifacts in one call |
+
+All artifact read methods accept an optional `run_id` keyword argument to pin
+to a specific processing run.
+
+### SDK exceptions
+
+| Exception | HTTP status |
+|-----------|-------------|
+| `AuthError` | 401, 403 |
+| `NotFoundError` | 404 |
+| `QuotaError` | 429 |
+| `ServerError` | 5xx |
+| `PollingTimeout` | — (raised after timeout expires) |
+
+All exceptions inherit from `MotionStateError`.
+
+### Example scripts
+
+See `examples/python/` for runnable scripts:
+
+| Script | Description |
+|--------|-------------|
+| `upload_and_poll.py` | Upload a file, wait for completion, print summary |
+| `signed_upload_then_poll.py` | Signed S3 upload path, then poll |
+| `fetch_latest_timeline.py` | Print the timeline manifest for a video |
+| `list_runs_and_usage.py` | Show all runs and monthly usage |
+
 ## Endpoints
 
 | Method | Path | Description |
