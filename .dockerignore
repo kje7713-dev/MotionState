@@ -1,0 +1,47 @@
+# Version control
+.git
+.github
+
+# Python virtual environments and caches
+.venv
+venv
+env
+__pycache__
+*.py[cod]
+*.pyo
+.pytest_cache
+.mypy_cache
+.ruff_cache
+*.egg-info
+dist
+build
+
+# Test fixtures and test suite (not needed at runtime)
+tests
+
+# Local data directories (populated at runtime; not part of the image)
+data
+
+# Editor and OS files
+.vscode
+.idea
+*.swp
+*.swo
+.DS_Store
+
+# Environment files (secrets must come from env vars, not baked into image)
+.env
+*.env.local
+.env.example
+.env.local.example
+.env.s3.example
+.env.webhook-dev.example
+
+# Docs and examples (not needed at runtime)
+docs
+examples
+sdk
+scripts
+
+# Node modules (if any frontend work is ever added)
+node_modules

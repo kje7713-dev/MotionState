@@ -1,6 +1,7 @@
 .PHONY: dev test lint format down smoke \
         bootstrap bootstrap-local bootstrap-staging \
-        verify-deploy
+        verify-deploy \
+        docker-build-api docker-build-worker docker-build
 
 dev:
 	docker compose up --build
@@ -56,3 +57,18 @@ verify-deploy:
 	else \
 		python scripts/verify_deploy.py; \
 	fi
+
+# ---------------------------------------------------------------------------
+# Docker build targets (Railway Dockerfile-based deployment)
+# ---------------------------------------------------------------------------
+
+# Build the API image from the root-level Dockerfile.api.
+docker-build-api:
+	docker build -f Dockerfile.api -t motionstate-api:local .
+
+# Build the worker image from the root-level Dockerfile.worker.
+docker-build-worker:
+	docker build -f Dockerfile.worker -t motionstate-worker:local .
+
+# Build both images.
+docker-build: docker-build-api docker-build-worker

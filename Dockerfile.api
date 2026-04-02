@@ -1,0 +1,19 @@
+FROM python:3.11-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg libpq-dev gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir -e "."
+
+COPY apps/ apps/
+COPY libs/ libs/
+
+EXPOSE 8000
+
+# Railway injects PORT; fall back to 8000 for local/Docker Compose use.
+# Use sh -c so ${PORT:-8000} is expanded while keeping exec semantics for signals.
+CMD ["sh", "-c", "uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

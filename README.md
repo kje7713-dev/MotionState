@@ -106,6 +106,83 @@ make verify-deploy
 | `.env.s3.example` | S3 / Cloudflare R2 object storage |
 | `.env.webhook-dev.example` | Developing webhook integrations |
 
+## Deploy on Railway
+
+MotionState ships root-level `Dockerfile.api` and `Dockerfile.worker` so
+Railway can build each service deterministically — no Railpack guesswork.
+
+### Two-service setup
+
+Create **two separate Railway services** in the same project:
+
+| Service | Dockerfile | Public domain? |
+|---------|-----------|----------------|
+| `api` | `Dockerfile.api` | Yes — expose on Railway's generated domain |
+| `worker` | `Dockerfile.worker` | No — internal only |
+
+### Step-by-step
+
+1. **Create a new Railway project.**
+
+2. **Add the API service**
+   - Connect the GitHub repo.
+   - Under *Settings → Build*, set **Builder** to **Dockerfile**.
+   - Set **Dockerfile path** to `Dockerfile.api`.
+   - Enable a public domain under *Networking → Public Networking*.
+
+3. **Add the worker service**
+   - Add a second service from the same repo.
+   - Set **Builder** to **Dockerfile** and **Dockerfile path** to `Dockerfile.worker`.
+   - Do **not** assign a public domain — the worker has no HTTP interface.
+
+4. **Provision backing services** (outside this repo):
+   - Add a **PostgreSQL** plugin (or external Postgres) — Railway provides one.
+   - Add a **Redis** plugin (or external Redis) — Railway provides one.
+   - For production artifact storage add an **S3 / Cloudflare R2** bucket.
+
+5. **Set shared environment variables** on both services (or use a Railway
+   shared-variable group):
+
+   | Variable | Notes |
+   |----------|-------|
+   | `DATABASE_URL` | `postgresql+asyncpg://…` — from Railway Postgres plugin |
+   | `REDIS_URL` | `redis://…` — from Railway Redis plugin |
+   | `API_KEY_HMAC_SECRET` | Strong random value: `openssl rand -hex 32` |
+   | `ADMIN_TOKEN` | Strong random value (leave empty to disable admin API) |
+   | `STORAGE_BACKEND` | `local` (default) or `s3` for production |
+   | `ARTIFACTS_DIR` | Only needed for `local` backend; defaults to `./data/artifacts` |
+
+   S3 / R2 extras (only when `STORAGE_BACKEND=s3`):
+
+   | Variable | Notes |
+   |----------|-------|
+   | `S3_BUCKET` | Bucket name |
+   | `S3_REGION` | AWS region or `auto` for R2 |
+   | `S3_ENDPOINT_URL` | R2 endpoint URL; omit for AWS S3 |
+   | `S3_ACCESS_KEY_ID` | Access key |
+   | `S3_SECRET_ACCESS_KEY` | Secret key |
+
+6. **Deploy.** Railway will build each service from its Dockerfile and start:
+   - API: `uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000}`
+   - Worker: `python -m apps.worker.main`
+
+### Port behaviour
+
+The API container respects Railway's injected `PORT` environment variable.
+If `PORT` is not set (local Docker Compose or manual deploy) it defaults to
+`8000`.  The worker has no listening port.
+
+### Validating the images locally
+
+```bash
+# Build both images from the repo root
+make docker-build
+
+# Or individually
+make docker-build-api
+make docker-build-worker
+```
+
 ## Python SDK
 
 The `sdk/python/motionstate_client` package is a small official SDK that wraps
