@@ -60,6 +60,9 @@ class Project(Base):
 
     api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="project")
     videos: Mapped[list["Video"]] = relationship("Video", back_populates="project")
+    webhook_endpoints: Mapped[list["WebhookEndpoint"]] = relationship(
+        "WebhookEndpoint", back_populates="project"
+    )
 
 
 class ApiKey(Base):
@@ -221,3 +224,38 @@ class Artifact(Base):
     processing_run: Mapped["ProcessingRun | None"] = relationship(
         "ProcessingRun", back_populates="artifacts"
     )
+
+
+class WebhookEndpoint(Base):
+    """A project-scoped webhook endpoint for receiving run lifecycle events.
+
+    The ``secret`` is used to sign outgoing payloads with HMAC-SHA256 so that
+    receivers can verify authenticity.  ``event_types_json`` is a JSON list of
+    :class:`~libs.events.RunEventType` string values; when ``None`` all event
+    types are delivered.
+    """
+
+    __tablename__ = "webhook_endpoints"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=False, index=True
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    secret: Mapped[str] = mapped_column(String(256), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    event_types_json: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    project: Mapped["Project"] = relationship("Project", back_populates="webhook_endpoints")
+

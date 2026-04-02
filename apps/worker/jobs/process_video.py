@@ -22,12 +22,14 @@ from pathlib import Path
 
 from libs.config import settings
 from libs.db import AsyncSessionLocal
+from libs.events import RunEventType
 from libs.models import Artifact, Job, JobStatus, ProcessingRun, RunStatus, Video, VideoStatus
 from libs.pipeline.run_pipeline import run_pipeline
 from libs.storage import artifact_key, get_storage, normalized_video_key
 from libs.video.clips import generate_clips
 from libs.video.ffmpeg import normalize_video, probe_video
 from libs.video.frames import extract_frames
+from libs.webhooks import enqueue_run_event
 
 logger = logging.getLogger(__name__)
 
@@ -114,6 +116,22 @@ async def handle_process_video(message: dict) -> None:
             run.status = RunStatus.running
             run.started_at = datetime.now(UTC)
         await db.commit()
+
+        # Emit running event (non-blocking; errors are swallowed).
+        if run is not None and video.project_id is not None:
+            try:
+                await enqueue_run_event(
+                    db,
+                    RunEventType.running,
+                    project_id=video.project_id,
+                    video_id=video_id,
+                    processing_run_id=run.id,
+                    status=RunStatus.running,
+                )
+            except Exception:
+                logger.exception(
+                    "Failed to enqueue running event for run %s", run.id if run else None
+                )
 
         try:
             source = video.source_path
@@ -368,6 +386,29 @@ async def handle_process_video(message: dict) -> None:
             await db.commit()
             logger.info("Job %s completed successfully.", job_id)
 
+            # Emit completed event (non-blocking; errors are swallowed).
+            if run is not None and video.project_id is not None:
+                artifact_types = [
+                    "state", "detections", "tracks", "poses",
+                    "features", "segments", "timeline_manifest",
+                ]
+                if clips_info:
+                    artifact_types.append("segment_clip")
+                try:
+                    await enqueue_run_event(
+                        db,
+                        RunEventType.completed,
+                        project_id=video.project_id,
+                        video_id=video_id,
+                        processing_run_id=run.id,
+                        status=RunStatus.completed,
+                        artifact_types=artifact_types,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to enqueue completed event for run %s", run.id
+                    )
+
         except Exception as exc:
             logger.exception("Error processing job %s", job_id)
             job.status = JobStatus.error
@@ -378,6 +419,23 @@ async def handle_process_video(message: dict) -> None:
                 run.error = str(exc)
                 run.completed_at = datetime.now(UTC)
             await db.commit()
+
+            # Emit failed event (non-blocking; errors are swallowed).
+            if run is not None and video.project_id is not None:
+                try:
+                    await enqueue_run_event(
+                        db,
+                        RunEventType.failed,
+                        project_id=video.project_id,
+                        video_id=video_id,
+                        processing_run_id=run.id,
+                        status=RunStatus.error,
+                        error=str(exc),
+                    )
+                except Exception:
+                    logger.exception(
+                        "Failed to enqueue failed event for run %s", run.id if run else None
+                    )
             raise
 
 

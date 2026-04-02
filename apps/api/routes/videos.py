@@ -1,6 +1,7 @@
 """Video upload and retrieval routes."""
 
 import json
+import logging
 import uuid
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from libs.artifacts import get_latest_artifact, read_artifact_json
 from libs.auth import get_current_project
 from libs.config import settings
 from libs.db import get_db
+from libs.events import RunEventType
 from libs.models import (
     Artifact,
     Job,
@@ -35,8 +37,10 @@ from libs.schemas import (
     TracksArtifact,
 )
 from libs.storage import get_storage, source_video_key
+from libs.webhooks import enqueue_run_event
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.post("", status_code=201)
@@ -100,6 +104,19 @@ async def upload_video(
 
     # Enqueue the job in Redis.
     await enqueue(job.id, JobType.process_video.value, {"video_id": video.id})
+
+    # Emit created event for downstream webhook subscribers (non-blocking).
+    try:
+        await enqueue_run_event(
+            db,
+            RunEventType.created,
+            project_id=current_project.id,
+            video_id=video.id,
+            processing_run_id=run.id,
+            status=RunStatus.pending,
+        )
+    except Exception:
+        logger.exception("Failed to enqueue created event for run %s", run.id)
 
     return {"video_id": video.id, "job_id": job.id, "processing_run_id": run.id}
 
@@ -542,6 +559,19 @@ async def reprocess_video(
     await db.flush()  # populate job.id
 
     await enqueue(job.id, JobType.process_video.value, {"video_id": video_id})
+
+    # Emit created event for downstream webhook subscribers (non-blocking).
+    try:
+        await enqueue_run_event(
+            db,
+            RunEventType.created,
+            project_id=current_project.id,
+            video_id=video_id,
+            processing_run_id=run.id,
+            status=RunStatus.pending,
+        )
+    except Exception:
+        logger.exception("Failed to enqueue created event for run %s", run.id)
 
     return {"video_id": video_id, "processing_run_id": run.id, "job_id": job.id}
 

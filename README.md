@@ -87,6 +87,10 @@ Visit `http://localhost:8000/health` — should return `{"status":"ok"}`.
 | GET | `/projects/{project_id}` | Get project metadata |
 | POST | `/projects/{project_id}/api-keys` | Generate a new API key for a project (raw key returned once) |
 | GET | `/projects/{project_id}/api-keys` | List API keys for a project (without raw key) |
+| POST | `/projects/{project_id}/webhooks` | Register a webhook endpoint for a project |
+| GET | `/projects/{project_id}/webhooks` | List webhook endpoints for a project |
+| PATCH | `/projects/{project_id}/webhooks/{webhook_id}` | Update a webhook endpoint (url, is_active, event_types) |
+| DELETE | `/projects/{project_id}/webhooks/{webhook_id}` | Delete a webhook endpoint |
 
 > **All video and job routes require authentication.** See [Authentication](#authentication) below.
 
@@ -153,6 +157,119 @@ curl "http://localhost:8000/videos/1/state" \
 # List keys for a project (no raw secrets included)
 curl "http://localhost:8000/projects/1/api-keys" \
   -H "X-API-Key: ms_live_your_secret_key"
+```
+
+## Webhooks
+
+MotionState pushes signed HTTP POST notifications to registered endpoints
+whenever a processing run changes state.  This eliminates polling and makes
+integration straightforward.
+
+### Setup
+
+**1. Register a webhook endpoint**
+
+```bash
+curl -X POST "http://localhost:8000/projects/1/webhooks" \
+  -H "Content-Type: application/json" \
+  -d '{"url": "https://your-service.example.com/webhooks/motionstate"}'
+# → {"id": 1, "secret": "<64-char hex>", "is_active": true, "event_types": null, ...}
+```
+
+> **Save the `secret` value now.** It is generated once and never returned again.
+> Use it to verify incoming request signatures.
+
+**2. Optionally filter by event type**
+
+```bash
+curl -X POST "http://localhost:8000/projects/1/webhooks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "url": "https://your-service.example.com/webhooks",
+    "event_types": ["processing_run.completed", "processing_run.failed"]
+  }'
+```
+
+When `event_types` is `null` the endpoint receives **all** event types.
+
+### Event types
+
+| Event type | When emitted |
+|------------|-------------|
+| `processing_run.created` | A new processing run row is created (video upload or reprocess request) |
+| `processing_run.running` | Worker picks up the job and starts processing |
+| `processing_run.completed` | Pipeline finished successfully; artifacts are written |
+| `processing_run.failed` | Pipeline encountered an unrecoverable error |
+
+### Payload format
+
+```json
+{
+  "event_id": "b7e2a1c0-4f3d-4e8b-91a2-123456789abc",
+  "event_type": "processing_run.completed",
+  "occurred_at": "2024-06-01T12:34:56.789012+00:00",
+  "project_id": 1,
+  "video_id": 42,
+  "processing_run_id": 7,
+  "status": "completed",
+  "artifact_types": ["state", "detections", "tracks", "poses", "features", "segments", "timeline_manifest"]
+}
+```
+
+For `processing_run.failed` events an `"error"` field is included:
+
+```json
+{
+  "event_type": "processing_run.failed",
+  "status": "error",
+  "error": "Source video not found: ..."
+}
+```
+
+For `processing_run.completed` events an `"artifact_types"` list is included.
+
+### Verifying signatures
+
+Every delivery includes an `X-MotionState-Signature` header containing the
+HMAC-SHA256 hex digest of the **raw request body** keyed with the endpoint's
+secret.  Keys are JSON-serialised with `sort_keys=True` for determinism.
+
+```python
+import hashlib, hmac
+
+def verify_signature(raw_body: bytes, secret: str, received_sig: str) -> bool:
+    expected = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, received_sig)
+
+# In your webhook handler:
+body = request.get_data()  # raw bytes before JSON parse
+sig  = request.headers.get("X-MotionState-Signature", "")
+if not verify_signature(body, WEBHOOK_SECRET, sig):
+    abort(401)
+```
+
+### Delivery behaviour
+
+- Webhooks are delivered **asynchronously** by the background worker.  The API
+  never blocks on webhook delivery.
+- Up to **4 attempts** total (1 initial + 3 retries) are made before giving up.
+- `last_success_at` and `last_failure_at` timestamps are updated on the
+  endpoint row after each attempt.
+- Inactive endpoints (`is_active: false`) are silently skipped.
+
+### Managing endpoints
+
+```bash
+# List endpoints (secret not included)
+curl "http://localhost:8000/projects/1/webhooks"
+
+# Disable an endpoint
+curl -X PATCH "http://localhost:8000/projects/1/webhooks/1" \
+  -H "Content-Type: application/json" \
+  -d '{"is_active": false}'
+
+# Delete an endpoint
+curl -X DELETE "http://localhost:8000/projects/1/webhooks/1"
 ```
 
 ## Development
