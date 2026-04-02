@@ -39,3 +39,8 @@ class LocalStorage(StorageBackend):
     async def generate_upload_url(self, key: str, expires_in: int) -> None:  # type: ignore[override]
         """Local storage does not support pre-signed upload URLs; always returns None."""
         return None
+
+    async def check_reachable(self) -> None:
+        """Confirm that the local root directory is accessible."""
+        if not self._root.exists():
+            raise OSError(f"Local storage root does not exist: {self._root}")

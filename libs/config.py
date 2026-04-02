@@ -61,5 +61,10 @@ class Settings(BaseSettings):
     # Set this to a strong random value in production (e.g. openssl rand -hex 32).
     api_key_hmac_secret: str = "change-me-in-production"
 
+    # Admin token for accessing /admin/* endpoints.
+    # Set to a strong random value in production (e.g. openssl rand -hex 32).
+    # When empty (default) admin endpoints are disabled and return 403.
+    admin_token: str = ""
+
 
 settings = Settings()

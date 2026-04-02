@@ -43,3 +43,15 @@ class StorageBackend(ABC):
             expires_in: Seconds until the pre-signed URL expires.
         """
         ...
+
+    async def check_reachable(self) -> None:
+        """Assert that the storage backend is reachable.
+
+        Subclasses should override this to perform a lightweight liveness probe
+        (e.g. list-bucket or stat the root directory).  The default
+        implementation is a no-op (always passes).
+
+        Raises:
+            Exception: if the backend cannot be reached.
+        """
+        return  # noqa: B027 — intentional no-op default

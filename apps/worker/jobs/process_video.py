@@ -130,6 +130,17 @@ async def handle_process_video(message: dict) -> None:
             run.started_at = datetime.now(UTC)
         await db.commit()
 
+        logger.info(
+            "Run started",
+            extra={
+                "project_id": video.project_id,
+                "video_id": video_id,
+                "processing_run_id": run.id if run else None,
+                "job_id": job_id,
+                "status": "running",
+            },
+        )
+
         # Emit running event (non-blocking; errors are swallowed).
         if run is not None and video.project_id is not None:
             try:
@@ -446,6 +457,23 @@ async def handle_process_video(message: dict) -> None:
                 )
 
             await db.commit()
+            completed_at = datetime.now(UTC)
+            duration_ms = (
+                int((completed_at - run.started_at).total_seconds() * 1000)
+                if run is not None and run.started_at
+                else None
+            )
+            logger.info(
+                "Run completed",
+                extra={
+                    "project_id": video.project_id,
+                    "video_id": video_id,
+                    "processing_run_id": run.id if run else None,
+                    "job_id": job_id,
+                    "status": "completed",
+                    "duration_ms": duration_ms,
+                },
+            )
             logger.info("Job %s completed successfully.", job_id)
 
             # Emit completed event (non-blocking; errors are swallowed).
@@ -481,6 +509,18 @@ async def handle_process_video(message: dict) -> None:
                 run.error = str(exc)
                 run.completed_at = datetime.now(UTC)
             await db.commit()
+
+            logger.error(
+                "Run failed",
+                extra={
+                    "project_id": video.project_id,
+                    "video_id": video_id,
+                    "processing_run_id": run.id if run else None,
+                    "job_id": job_id,
+                    "status": "error",
+                    "error": str(exc),
+                },
+            )
 
             # Emit failed event (non-blocking; errors are swallowed).
             if run is not None and video.project_id is not None:
