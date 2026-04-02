@@ -82,8 +82,6 @@ async def test_deliver_webhook_raises_on_http_error():
 
 def _make_delivery_message(
     webhook_id: int = 1,
-    url: str = "https://example.com/hook",
-    secret: str = "secret",
     event_type: str = "processing_run.completed",
     retry_count: int = 0,
 ) -> dict:
@@ -92,8 +90,6 @@ def _make_delivery_message(
         "type": "deliver_webhook",
         "payload": {
             "webhook_id": webhook_id,
-            "url": url,
-            "secret": secret,
             "event_payload": {
                 "event_id": "abc123",
                 "event_type": event_type,

@@ -121,14 +121,15 @@ async def enqueue_run_event(
         if subscribed is not None and event_type not in subscribed:
             continue
 
+        # The secret is intentionally NOT included in the queue message.
+        # The worker looks up the secret from the DB at delivery time so that
+        # secrets never persist in Redis.
         message = json.dumps(
             {
                 "job_id": 0,
                 "type": "deliver_webhook",
                 "payload": {
                     "webhook_id": webhook.id,
-                    "url": webhook.url,
-                    "secret": webhook.secret,
                     "event_payload": payload,
                     "retry_count": 0,
                 },
