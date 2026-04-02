@@ -194,7 +194,7 @@ async def test_get_artifact_content_local_returns_parsed_json(tmp_path):
     from unittest.mock import AsyncMock, MagicMock
 
     from apps.api.routes.videos import _get_artifact_content
-    from libs.models import Artifact, Project, Video
+    from libs.models import Artifact, Video
     from tests.conftest import make_fake_project
 
     path = _write_artifact(tmp_path, 1, "state.json", SAMPLE_STATE)
