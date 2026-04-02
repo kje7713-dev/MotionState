@@ -23,9 +23,19 @@ from pathlib import Path
 from libs.config import settings
 from libs.db import AsyncSessionLocal
 from libs.events import RunEventType
-from libs.models import Artifact, Job, JobStatus, ProcessingRun, RunStatus, Video, VideoStatus
+from libs.models import (
+    Artifact,
+    Job,
+    JobStatus,
+    ProcessingRun,
+    RunStatus,
+    UsageEventType,
+    Video,
+    VideoStatus,
+)
 from libs.pipeline.run_pipeline import run_pipeline
 from libs.storage import artifact_key, get_storage, normalized_video_key
+from libs.usage import emit as emit_usage
 from libs.video.clips import generate_clips
 from libs.video.ffmpeg import normalize_video, probe_video
 from libs.video.frames import extract_frames
@@ -82,13 +92,16 @@ def _build_pose_estimator():
     return StubPoseEstimator()
 
 
-async def _save_json(storage, key: str, data: dict) -> str:
+async def _save_json(storage, key: str, data: dict) -> tuple[str, int]:
     """Serialize *data* to JSON bytes and persist via *storage*.
 
     Returns:
-        The canonical path / key returned by the storage backend.
+        A ``(canonical_path, byte_count)`` tuple.  The byte count can be used
+        to record a ``storage_bytes_written`` usage event.
     """
-    return await storage.save(json.dumps(data, indent=2).encode(), key)
+    payload = json.dumps(data, indent=2).encode()
+    saved = await storage.save(payload, key)
+    return saved, len(payload)
 
 
 async def handle_process_video(message: dict) -> None:
@@ -179,27 +192,27 @@ async def handle_process_video(message: dict) -> None:
 
             # --- Write detections artifact ---
             det_key = artifact_key(video_id, "detections.json")
-            det_saved = await _save_json(storage, det_key, detections)
+            det_saved, det_bytes = await _save_json(storage, det_key, detections)
             logger.info("Detections artifact written to %s", det_saved)
 
             # --- Write tracks artifact ---
             trk_key = artifact_key(video_id, "tracks.json")
-            trk_saved = await _save_json(storage, trk_key, tracks)
+            trk_saved, trk_bytes = await _save_json(storage, trk_key, tracks)
             logger.info("Tracks artifact written to %s", trk_saved)
 
             # --- Write poses artifact ---
             poses_key = artifact_key(video_id, "poses.json")
-            poses_saved = await _save_json(storage, poses_key, poses)
+            poses_saved, poses_bytes = await _save_json(storage, poses_key, poses)
             logger.info("Poses artifact written to %s", poses_saved)
 
             # --- Write features artifact ---
             feat_key = artifact_key(video_id, "features.json")
-            feat_saved = await _save_json(storage, feat_key, features)
+            feat_saved, feat_bytes = await _save_json(storage, feat_key, features)
             logger.info("Features artifact written to %s", feat_saved)
 
             # --- Write segments artifact ---
             seg_key = artifact_key(video_id, "segments.json")
-            seg_saved = await _save_json(storage, seg_key, segments)
+            seg_saved, seg_bytes = await _save_json(storage, seg_key, segments)
             logger.info("Segments artifact written to %s", seg_saved)
 
             # --- Generate clips (local temp dir; then upload via storage) ---
@@ -210,13 +223,16 @@ async def handle_process_video(message: dict) -> None:
             # Upload each clip through the storage backend and record the
             # canonical path returned by the backend.
             clip_saved_paths: list[str] = []
+            clip_total_bytes: int = 0
             for clip in clips_info:
                 clip_local = Path(clip["path"])
+                clip_data = clip_local.read_bytes()
                 clip_rel_key = artifact_key(
                     video_id, f"clips/{clip_local.name}"
                 )
-                clip_saved = await storage.save(clip_local.read_bytes(), clip_rel_key)
+                clip_saved = await storage.save(clip_data, clip_rel_key)
                 clip_saved_paths.append(clip_saved)
+                clip_total_bytes += len(clip_data)
 
             # --- Build timeline manifest ---
             # Use the canonical paths returned by the storage backend so that
@@ -254,7 +270,7 @@ async def handle_process_video(message: dict) -> None:
                     for i, seg in enumerate(clips_info)
                 ],
             }
-            manifest_saved = await _save_json(storage, manifest_key, manifest)
+            manifest_saved, manifest_bytes = await _save_json(storage, manifest_key, manifest)
             logger.info("Timeline manifest written to %s", manifest_saved)
 
             # --- Update state with clip summary and manifest path ---
@@ -264,7 +280,7 @@ async def handle_process_video(message: dict) -> None:
             }
             state["manifest_path"] = manifest_saved
             state_key = artifact_key(video_id, "state.json")
-            state_saved = await _save_json(storage, state_key, state)
+            state_saved, state_bytes = await _save_json(storage, state_key, state)
             logger.info("State artifact written to %s", state_saved)
 
             # Helper to build Artifact kwargs with optional run linkage.
@@ -382,6 +398,52 @@ async def handle_process_video(message: dict) -> None:
                 run.status = RunStatus.completed
                 run.completed_at = datetime.now(UTC)
                 run.pipeline_version = str(state.get("version", ""))
+
+            # --- Emit usage events (if project is set) ---
+            if video.project_id is not None:
+                total_json_bytes = (
+                    det_bytes + trk_bytes + poses_bytes
+                    + feat_bytes + seg_bytes + manifest_bytes + state_bytes
+                )
+                total_storage_bytes = total_json_bytes + clip_total_bytes
+
+                await emit_usage(
+                    db,
+                    project_id=video.project_id,
+                    event_type=UsageEventType.video_seconds_processed,
+                    quantity=max(1, int(meta["duration_seconds"])),
+                    processing_run_id=run_id,
+                    metadata={"video_id": video_id},
+                )
+                await emit_usage(
+                    db,
+                    project_id=video.project_id,
+                    event_type=UsageEventType.frames_extracted,
+                    quantity=len(frames),
+                    processing_run_id=run_id,
+                    metadata={"video_id": video_id},
+                )
+                if clips_info:
+                    await emit_usage(
+                        db,
+                        project_id=video.project_id,
+                        event_type=UsageEventType.clips_generated,
+                        quantity=len(clips_info),
+                        processing_run_id=run_id,
+                        metadata={"video_id": video_id},
+                    )
+                await emit_usage(
+                    db,
+                    project_id=video.project_id,
+                    event_type=UsageEventType.storage_bytes_written,
+                    quantity=total_storage_bytes,
+                    processing_run_id=run_id,
+                    metadata={
+                        "video_id": video_id,
+                        "json_bytes": total_json_bytes,
+                        "clip_bytes": clip_total_bytes,
+                    },
+                )
 
             await db.commit()
             logger.info("Job %s completed successfully.", job_id)

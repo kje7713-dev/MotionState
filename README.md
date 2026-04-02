@@ -272,6 +272,115 @@ curl -X PATCH "http://localhost:8000/projects/1/webhooks/1" \
 curl -X DELETE "http://localhost:8000/projects/1/webhooks/1"
 ```
 
+## Usage metering and project quotas
+
+MotionState records append-only **usage events** for each project so that
+operators can see what the service is actually doing and enforce resource
+limits before they become a problem.
+
+> **This is internal accounting and quota control, not billing.**
+> There is no invoice generation, no pricing logic, and no payment provider
+> integration in this repo.
+
+### Metered dimensions
+
+The following dimensions are tracked per project:
+
+| `event_type` | unit | when emitted |
+|---|---|---|
+| `videos_uploaded` | count | on `POST /videos` and `POST /videos/upload-init` |
+| `video_seconds_processed` | seconds | on processing-run completion (worker) |
+| `frames_extracted` | count | on processing-run completion (worker) |
+| `clips_generated` | count | on processing-run completion (worker) |
+| `storage_bytes_written` | bytes | on processing-run completion (all JSON artifacts + clips) |
+| `webhook_deliveries` | count | on successful webhook delivery (worker) |
+| `api_reads` | count | (reserved; not yet emitted on all read endpoints) |
+
+All events are stored in the `usage_events` table and are never modified or
+deleted — aggregations are computed at query time.
+
+### Project quota fields
+
+Each `Project` row may have the following limit fields (all nullable;
+`null` means unlimited):
+
+| Field | Default | Description |
+|---|---|---|
+| `max_videos_per_month` | `null` | Max videos that can be uploaded per calendar month |
+| `max_video_seconds_per_month` | `null` | Max video-seconds processed per calendar month |
+| `max_storage_bytes` | `null` | Cumulative storage byte ceiling |
+| `max_api_reads_per_month` | `null` | Max API read calls per calendar month (reserved) |
+| `is_suspended` | `false` | If `true`, all new uploads and reprocessing are rejected |
+
+Quota fields are set directly on the `Project` row (e.g. via a database
+admin tool or a future management API).
+
+### Quota enforcement
+
+Quota violations are checked at the start of:
+
+- `POST /videos` (multipart upload)
+- `POST /videos/upload-init` (direct-to-storage upload init)
+- `POST /videos/{id}/reprocess`
+
+Behavior on violation:
+
+- **Suspended project** → `403 Forbidden` with `"reason": "project_suspended"`
+- **Monthly limit reached** → `429 Too Many Requests` with the quota dimension and current value
+- **Storage ceiling reached** → `429 Too Many Requests`
+
+Example error response:
+
+```json
+{
+  "detail": {
+    "error": "quota_exceeded",
+    "reason": "max_videos_per_month",
+    "limit": 50,
+    "current": 50,
+    "message": "Project has reached its monthly video upload limit (50)."
+  }
+}
+```
+
+### Usage API endpoints
+
+```bash
+# Full usage summary (current month + all-time + storage)
+GET /projects/{project_id}/usage
+
+# Current calendar-month totals only
+GET /projects/{project_id}/usage/current-month
+
+# View quota configuration for a project
+GET /projects/{project_id}/quotas
+```
+
+Example response for `GET /projects/1/usage`:
+
+```json
+{
+  "project_id": 1,
+  "current_month": {
+    "year": 2025,
+    "month": 4,
+    "totals": {
+      "videos_uploaded": 12,
+      "frames_extracted": 2400,
+      "clips_generated": 48,
+      "storage_bytes_written": 524288000,
+      "video_seconds_processed": 360,
+      "webhook_deliveries": 24
+    }
+  },
+  "alltime": {
+    "videos_uploaded": 84,
+    "storage_bytes_written": 3670016000
+  },
+  "storage_bytes_total": 3670016000
+}
+```
+
 ## Development
 
 ```bash

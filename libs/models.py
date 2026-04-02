@@ -3,7 +3,19 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, Text, func
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    Enum,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -58,10 +70,20 @@ class Project(Base):
         nullable=False,
     )
 
+    # --- Quota fields (all nullable; None means unlimited) ---
+    max_videos_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_video_seconds_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    max_storage_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    max_api_reads_per_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    is_suspended: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     api_keys: Mapped[list["ApiKey"]] = relationship("ApiKey", back_populates="project")
     videos: Mapped[list["Video"]] = relationship("Video", back_populates="project")
     webhook_endpoints: Mapped[list["WebhookEndpoint"]] = relationship(
         "WebhookEndpoint", back_populates="project"
+    )
+    usage_events: Mapped[list["UsageEvent"]] = relationship(
+        "UsageEvent", back_populates="project"
     )
 
 
@@ -258,4 +280,44 @@ class WebhookEndpoint(Base):
     last_failure_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     project: Mapped["Project"] = relationship("Project", back_populates="webhook_endpoints")
+
+
+class UsageEventType(enum.StrEnum):
+    """Metered dimensions tracked per project."""
+
+    videos_uploaded = "videos_uploaded"
+    video_seconds_processed = "video_seconds_processed"
+    frames_extracted = "frames_extracted"
+    clips_generated = "clips_generated"
+    storage_bytes_written = "storage_bytes_written"
+    webhook_deliveries = "webhook_deliveries"
+    api_reads = "api_reads"
+
+
+class UsageEvent(Base):
+    """Append-only record of a single metered usage event for a project.
+
+    Each row represents a discrete quantity of a single dimension consumed
+    at a point in time.  Rows are never updated or deleted; aggregations
+    are computed by summing ``quantity`` over the desired time window.
+    """
+
+    __tablename__ = "usage_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("projects.id"), nullable=False, index=True
+    )
+    processing_run_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("processing_runs.id"), nullable=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    unit: Mapped[str] = mapped_column(String(32), nullable=False)
+    metadata_json: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+    project: Mapped["Project"] = relationship("Project", back_populates="usage_events")
 
