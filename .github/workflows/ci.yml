@@ -50,3 +50,17 @@ jobs:
 
       - name: Smoke test
         run: pytest tests/ -v -m smoke
+
+  docker-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build API image
+        run: docker build -f Dockerfile.api -t motionstate-api:ci .
+
+      - name: Build worker image
+        run: docker build -f Dockerfile.worker -t motionstate-worker:ci .
