@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
-_ADMIN_TOKEN_HEADER = APIKeyHeader(name="X-Admin-Token", auto_error=False)
+_ADMIN_TOKEN_HEADER = APIKeyHeader(name="X-Admin-Token", scheme_name="AdminTokenAuth", auto_error=False)
 
 # ---------------------------------------------------------------------------
 # Admin auth dependency
