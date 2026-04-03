@@ -2,7 +2,12 @@
 
 from collections.abc import AsyncGenerator
 
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from libs.config import settings
 
@@ -25,7 +30,17 @@ def normalize_database_url(url: str) -> str:
     return url
 
 
-engine = create_async_engine(normalize_database_url(settings.database_url), echo=settings.debug)
+def make_engine(database_url: str, debug: bool) -> AsyncEngine:
+    """Create and return an async SQLAlchemy engine for *database_url*.
+
+    The URL is normalized via :func:`normalize_database_url` so callers may
+    pass plain ``postgresql://…`` URLs without needing to specify the asyncpg
+    driver explicitly.
+    """
+    return create_async_engine(normalize_database_url(database_url), echo=debug)
+
+
+engine = make_engine(settings.database_url, settings.debug)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

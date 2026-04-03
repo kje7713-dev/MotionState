@@ -1,10 +1,8 @@
 """Tests for database URL normalization (Railway / asyncpg compatibility)."""
 
-import importlib
 from unittest.mock import MagicMock, patch
 
-import libs.db
-from libs.db import normalize_database_url
+from libs.db import make_engine, normalize_database_url
 
 # ---------------------------------------------------------------------------
 # normalize_database_url unit tests
@@ -47,13 +45,9 @@ def test_normalize_preserves_query_string():
 
 
 def test_engine_creation_uses_normalized_url():
-    """create_async_engine receives the normalized URL, not the raw env string."""
+    """make_engine() passes the normalized URL to create_async_engine."""
     raw_url = "postgresql://user:pass@host:5432/db"
     expected_url = "postgresql+asyncpg://user:pass@host:5432/db"
-
-    mock_settings = MagicMock()
-    mock_settings.database_url = raw_url
-    mock_settings.debug = False
 
     captured = {}
 
@@ -61,17 +55,10 @@ def test_engine_creation_uses_normalized_url():
         captured["url"] = url
         return MagicMock()
 
-    try:
-        # Patch at the source so the re-imported name inside the module gets the mock.
-        with patch("sqlalchemy.ext.asyncio.create_async_engine", side_effect=fake_engine), \
-             patch("libs.config.settings", mock_settings):
-            importlib.reload(libs.db)
+    with patch("libs.db.create_async_engine", side_effect=fake_engine):
+        make_engine(raw_url, debug=False)
 
-        assert "url" in captured, "create_async_engine was not called during module load"
-        assert captured["url"] == expected_url, (
-            f"Expected normalized URL {expected_url!r}, got {captured['url']!r}"
-        )
-    finally:
-        # Restore the canonical module state so later tests see the original
-        # get_db/engine/session objects instead of the reloaded test-specific ones.
-        importlib.reload(libs.db)
+    assert "url" in captured, "create_async_engine was not called"
+    assert captured["url"] == expected_url, (
+        f"Expected normalized URL {expected_url!r}, got {captured['url']!r}"
+    )
