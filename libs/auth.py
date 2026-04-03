@@ -14,7 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from libs.db import get_db
 from libs.models import ApiKey, Project
 
-_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=False)
+_API_KEY_HEADER = APIKeyHeader(name="X-API-Key", scheme_name="ApiKeyAuth", auto_error=False)
 
 # Key format: ms_live_<32 hex chars>
 _KEY_PREFIX_LEN = 8  # "ms_live_" = 8 chars used as prefix display
