@@ -61,12 +61,17 @@ def test_engine_creation_uses_normalized_url():
         captured["url"] = url
         return MagicMock()
 
-    # Patch at the source so the re-imported name inside the module gets the mock.
-    with patch("sqlalchemy.ext.asyncio.create_async_engine", side_effect=fake_engine), \
-         patch("libs.config.settings", mock_settings):
-        importlib.reload(libs.db)
+    try:
+        # Patch at the source so the re-imported name inside the module gets the mock.
+        with patch("sqlalchemy.ext.asyncio.create_async_engine", side_effect=fake_engine), \
+             patch("libs.config.settings", mock_settings):
+            importlib.reload(libs.db)
 
-    assert "url" in captured, "create_async_engine was not called during module load"
-    assert captured["url"] == expected_url, (
-        f"Expected normalized URL {expected_url!r}, got {captured['url']!r}"
-    )
+        assert "url" in captured, "create_async_engine was not called during module load"
+        assert captured["url"] == expected_url, (
+            f"Expected normalized URL {expected_url!r}, got {captured['url']!r}"
+        )
+    finally:
+        # Restore the canonical module state so later tests see the original
+        # get_db/engine/session objects instead of the reloaded test-specific ones.
+        importlib.reload(libs.db)
