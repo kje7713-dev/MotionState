@@ -145,7 +145,7 @@ Create **two separate Railway services** in the same project:
 
    | Variable | Notes |
    |----------|-------|
-   | `DATABASE_URL` | `postgresql+asyncpg://…` — from Railway Postgres plugin |
+   | `DATABASE_URL` | Railway Postgres plugin URL — plain `postgresql://…` is normalized to `postgresql+asyncpg://…` automatically |
    | `REDIS_URL` | `redis://…` — from Railway Redis plugin |
    | `API_KEY_HMAC_SECRET` | Strong random value: `openssl rand -hex 32` |
    | `ADMIN_TOKEN` | Strong random value (leave empty to disable admin API) |
@@ -171,6 +171,23 @@ Create **two separate Railway services** in the same project:
 The API container respects Railway's injected `PORT` environment variable.
 If `PORT` is not set (local Docker Compose or manual deploy) it defaults to
 `8000`.  The worker has no listening port.
+
+### DATABASE_URL normalization
+
+Railway's Postgres plugin exposes `DATABASE_URL` as a plain `postgresql://…`
+connection string.  MotionState uses an async SQLAlchemy engine backed by
+`asyncpg`, which requires the `postgresql+asyncpg://…` scheme.
+
+MotionState normalizes the URL automatically at startup:
+
+```
+postgresql://user:pass@host:5432/db
+  → postgresql+asyncpg://user:pass@host:5432/db
+```
+
+You can paste the Railway-provided value directly into `DATABASE_URL` without
+any manual editing.  URLs that already use `postgresql+asyncpg://` are left
+unchanged.
 
 ### Validating the images locally
 
