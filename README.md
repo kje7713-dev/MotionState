@@ -145,7 +145,7 @@ Create **two separate Railway services** in the same project:
 
    | Variable | Notes |
    |----------|-------|
-   | `DATABASE_URL` | `postgresql+asyncpg://…` — from Railway Postgres plugin |
+   | `DATABASE_URL` | Railway Postgres URL — plain `postgresql://…` is accepted and automatically normalized to `postgresql+asyncpg://…` for async SQLAlchemy |
    | `REDIS_URL` | `redis://…` — from Railway Redis plugin |
    | `API_KEY_HMAC_SECRET` | Strong random value: `openssl rand -hex 32` |
    | `ADMIN_TOKEN` | Strong random value (leave empty to disable admin API) |
