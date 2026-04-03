@@ -1,11 +1,10 @@
 """Tests for database URL normalization (Railway / asyncpg compatibility)."""
 
+import importlib
 from unittest.mock import MagicMock, patch
 
-import pytest
-
+import libs.db
 from libs.db import normalize_database_url
-
 
 # ---------------------------------------------------------------------------
 # normalize_database_url unit tests
@@ -49,9 +48,6 @@ def test_normalize_preserves_query_string():
 
 def test_engine_creation_uses_normalized_url():
     """create_async_engine receives the normalized URL, not the raw env string."""
-    import importlib
-    import libs.db
-
     raw_url = "postgresql://user:pass@host:5432/db"
     expected_url = "postgresql+asyncpg://user:pass@host:5432/db"
 
