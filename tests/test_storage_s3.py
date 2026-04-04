@@ -14,11 +14,16 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ---------------------------------------------------------------------------
-# Ensure boto3 is importable even when the [storage] extras are not installed.
-# The mock is placed in sys.modules *before* any import that would trigger it.
+# Ensure boto3 and botocore are importable even when the [storage] extras are
+# not installed.  The mocks are placed in sys.modules *before* any import that
+# would trigger them.
 # ---------------------------------------------------------------------------
 if "boto3" not in sys.modules:
     sys.modules["boto3"] = MagicMock()
+if "botocore" not in sys.modules:
+    _botocore_mock = MagicMock()
+    sys.modules["botocore"] = _botocore_mock
+    sys.modules["botocore.config"] = _botocore_mock.config
 
 # ---------------------------------------------------------------------------
 # Helpers

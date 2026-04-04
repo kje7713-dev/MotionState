@@ -675,6 +675,9 @@ Set `STORAGE_BACKEND=s3` and supply bucket credentials.  The backend uses
 [boto3](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html) and
 is compatible with AWS S3 and Cloudflare R2 (via `S3_ENDPOINT_URL`).
 
+The boto3 client is explicitly configured with `signature_version="s3v4"` and
+`s3={"addressing_style": "path"}` for full Cloudflare R2 compatibility.
+
 ```bash
 pip install -e ".[storage]"   # or: pip install boto3
 

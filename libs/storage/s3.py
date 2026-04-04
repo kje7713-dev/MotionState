@@ -36,6 +36,7 @@ class S3Storage(StorageBackend):
     ) -> None:
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:
             raise ImportError(
                 "boto3 is required for S3Storage. "
@@ -54,6 +55,12 @@ class S3Storage(StorageBackend):
         client_kwargs: dict = {}
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
+
+        # Use SigV4 and path-style addressing for Cloudflare R2 compatibility.
+        client_kwargs["config"] = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": "path"},
+        )
 
         self._bucket = bucket
         self._client = boto3.client("s3", **session_kwargs, **client_kwargs)
