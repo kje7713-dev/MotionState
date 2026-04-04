@@ -54,36 +54,54 @@ async def upload_video(
 ) -> dict:
     """Accept an uploaded video, persist it, and enqueue a processing job.
 
-    This is the simple multipart-upload path suitable for local development
-    and small files.  For production deployments where clients should upload
-    directly to object storage, use ``POST /videos/upload-init`` instead.
+    This is the simple multipart-upload path.  It works for both local
+    development and hosted storage-backed deployments.  When the configured
+    storage backend is S3/R2, the uploaded bytes are stored through the
+    storage abstraction so that the worker (running in a separate container)
+    can retrieve the file from shared object storage.
+
+    For large files or direct-to-object-storage flows, use
+    ``POST /videos/upload-init`` instead.
 
     Returns:
-        ``{"video_id": int, "job_id": int}``
+        ``{"video_id": int, "job_id": int, "processing_run_id": int}``
     """
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
     # Quota check before accepting the upload.
     await check_quota(db, current_project, videos_upload=True)
 
-    # Use a UUID filename to avoid collisions while preserving the extension.
+    # Read the file contents once so we can either write locally or upload to
+    # object storage depending on the configured backend.
+    contents = await file.read()
     suffix = Path(file.filename or "upload").suffix or ".mp4"
-    dest_filename = f"{uuid.uuid4().hex}{suffix}"
-    dest_path = upload_dir / dest_filename
+    original_filename = file.filename or f"upload{suffix}"
 
-    async with aiofiles.open(dest_path, "wb") as fh:
-        await fh.write(await file.read())
-
-    # Persist the Video row.
+    # Persist the Video row first so we have a real video.id available for
+    # generating the canonical storage key (mirrors the upload-init flow).
     video = Video(
         project_id=current_project.id,
-        original_filename=file.filename or dest_filename,
+        original_filename=original_filename,
         status=VideoStatus.pending,
-        source_path=str(dest_path),
+        source_path=None,  # set below
     )
     db.add(video)
     await db.flush()  # populate video.id before creating the ProcessingRun
+
+    if settings.storage_backend == "s3":
+        # Store through the configured object-storage backend so the worker
+        # (running in a separate container) can retrieve the file.
+        storage = get_storage()
+        key = source_video_key(video.id, ext=suffix)
+        await storage.save(contents, key)
+        video.source_path = key
+    else:
+        # Local backend: write to disk as before.
+        upload_dir = Path(settings.upload_dir)
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        dest_filename = f"{uuid.uuid4().hex}{suffix}"
+        dest_path = upload_dir / dest_filename
+        async with aiofiles.open(dest_path, "wb") as fh:
+            await fh.write(contents)
+        video.source_path = str(dest_path)
 
     # Create a ProcessingRun for lineage tracking.
     run = ProcessingRun(

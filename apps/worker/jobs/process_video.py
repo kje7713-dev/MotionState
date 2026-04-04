@@ -17,6 +17,7 @@ Steps:
 
 import json
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -159,16 +160,50 @@ async def handle_process_video(message: dict) -> None:
 
         try:
             source = video.source_path
-            if not source or not Path(source).exists():
+            if not source:
                 raise FileNotFoundError(f"Source video not found: {source}")
 
             storage = get_storage(settings)
+
+            # When the storage backend is S3/R2 the source_path is a canonical
+            # storage key (e.g. "videos/42/source.mp4") rather than a local
+            # filesystem path.  Download it to a temporary file so FFmpeg can
+            # access it.  The temp file is always removed when done, even if
+            # normalization fails.
+            _tmp_source_path: str | None = None
+            if settings.storage_backend == "s3":
+                source_bytes = await storage.load(source)
+                tmp = tempfile.NamedTemporaryFile(
+                    suffix=Path(source).suffix, delete=False
+                )
+                try:
+                    tmp.write(source_bytes)
+                    tmp.close()
+                    _tmp_source_path = tmp.name
+                except Exception:
+                    tmp.close()
+                    Path(tmp.name).unlink(missing_ok=True)
+                    raise
+                local_source = _tmp_source_path
+            else:
+                if not Path(source).exists():
+                    raise FileNotFoundError(f"Source video not found: {source}")
+                local_source = source
 
             # --- Normalize ---
             norm_dir = Path(settings.normalized_dir)
             norm_dir.mkdir(parents=True, exist_ok=True)
             norm_path = norm_dir / f"{video_id}_normalized.mp4"
-            normalize_video(source, str(norm_path))
+            try:
+                normalize_video(local_source, str(norm_path))
+            finally:
+                # Remove the temporary source file (S3 download) now that
+                # normalization has finished (whether it succeeded or not).
+                if _tmp_source_path is not None:
+                    try:
+                        Path(_tmp_source_path).unlink(missing_ok=True)
+                    except OSError:
+                        logger.warning("Failed to remove temp source file %s", _tmp_source_path)
             logger.info("Normalized video written to %s", norm_path)
 
             # --- Probe metadata ---

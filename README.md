@@ -231,10 +231,10 @@ print(outputs["state"]["tracking_summary"])
 2. **Upload a video** (choose one path):
 
    ```python
-   # Simple upload (local dev / small files)
+   # Simple upload — works with both local and hosted S3/R2 deployments.
    upload = client.upload_video("clip.mp4")
 
-   # Signed upload (production / large files → direct to S3/R2)
+   # Direct-to-storage upload (large files → bypasses API server bandwidth)
    init = client.upload_init("clip.mp4")
    if init.upload_url:
        import httpx
@@ -707,10 +707,34 @@ All artifacts use a stable, human-readable key layout in the bucket:
 The `Artifact.path` DB column stores the canonical key so artifact reads are
 routed through the same storage backend regardless of which backend is active.
 
+### Simple multipart upload (`POST /videos`)
+
+`POST /videos` accepts a multipart file upload and works in **both** local and
+hosted storage-backed deployments:
+
+- **Local backend**: the uploaded file is written to the API container's local
+  `upload_dir` and the worker reads it from disk.
+- **S3/R2 backend**: the uploaded bytes are stored through the configured
+  storage abstraction using the canonical key `videos/{video_id}/source{ext}`.
+  The worker retrieves the file from shared object storage, so the API and
+  worker containers do not need to share a filesystem.
+
+```http
+POST /videos
+Content-Type: multipart/form-data; boundary=…
+
+→ 201
+{
+  "video_id": 42,
+  "job_id": 7,
+  "processing_run_id": 3
+}
+```
+
 ### Direct upload flow (`POST /videos/upload-init`)
 
-For production deployments the client should upload the source video directly
-to object storage instead of streaming through the API server.
+For large files or clients that need to upload directly to object storage
+without streaming through the API server, use `POST /videos/upload-init`.
 
 1. Client calls `POST /videos/upload-init` with `{"filename": "game.mp4"}`.
 2. API creates a pending `Video` row, generates a canonical storage key, and
@@ -730,8 +754,8 @@ POST /videos/upload-init
 }
 ```
 
-`upload_url` is `null` for the local backend — fall back to `POST /videos`
-(multipart upload through the API server) for local development.
+`upload_url` is `null` for the local backend.  In that case use
+`POST /videos` (simple multipart upload through the API server) instead.
 
 ### What remains out of scope for storage
 
