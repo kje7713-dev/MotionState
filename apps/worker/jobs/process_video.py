@@ -17,6 +17,7 @@ Steps:
 
 import json
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -159,17 +160,43 @@ async def handle_process_video(message: dict) -> None:
 
         try:
             source = video.source_path
-            if not source or not Path(source).exists():
+            if not source:
                 raise FileNotFoundError(f"Source video not found: {source}")
 
             storage = get_storage(settings)
+
+            # When the storage backend is S3/R2 the source_path is a canonical
+            # storage key (e.g. "videos/42/source.mp4") rather than a local
+            # filesystem path.  Download it to a temporary file so FFmpeg can
+            # access it.  The temp file is cleaned up after normalization.
+            _tmp_source_file = None
+            if settings.storage_backend == "s3":
+                source_bytes = await storage.load(source)
+                _tmp_source_file = tempfile.NamedTemporaryFile(
+                    suffix=Path(source).suffix, delete=False
+                )
+                _tmp_source_file.write(source_bytes)
+                _tmp_source_file.close()
+                local_source = _tmp_source_file.name
+            else:
+                if not Path(source).exists():
+                    raise FileNotFoundError(f"Source video not found: {source}")
+                local_source = source
 
             # --- Normalize ---
             norm_dir = Path(settings.normalized_dir)
             norm_dir.mkdir(parents=True, exist_ok=True)
             norm_path = norm_dir / f"{video_id}_normalized.mp4"
-            normalize_video(source, str(norm_path))
+            normalize_video(local_source, str(norm_path))
             logger.info("Normalized video written to %s", norm_path)
+
+            # Clean up the temporary source file (S3 download) now that
+            # normalization is complete.
+            if _tmp_source_file is not None:
+                try:
+                    Path(_tmp_source_file.name).unlink(missing_ok=True)
+                except Exception:
+                    logger.warning("Failed to remove temp source file %s", _tmp_source_file.name)
 
             # --- Probe metadata ---
             meta = probe_video(str(norm_path))
