@@ -36,6 +36,7 @@ class S3Storage(StorageBackend):
     ) -> None:
         try:
             import boto3
+            from botocore.config import Config
         except ImportError as exc:
             raise ImportError(
                 "boto3 is required for S3Storage. "
@@ -54,6 +55,18 @@ class S3Storage(StorageBackend):
         client_kwargs: dict = {}
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
+
+        # Always use SigV4; also force path-style addressing when a custom
+        # endpoint (e.g. Cloudflare R2, MinIO) is configured.  AWS S3 uses
+        # virtual-hosted style by default and deprecated path-style, so we
+        # only enable it when an explicit endpoint_url is provided.
+        s3_cfg: dict = {}
+        if endpoint_url:
+            s3_cfg["addressing_style"] = "path"
+        client_kwargs["config"] = Config(
+            signature_version="s3v4",
+            s3=s3_cfg or None,
+        )
 
         self._bucket = bucket
         self._client = boto3.client("s3", **session_kwargs, **client_kwargs)
