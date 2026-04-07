@@ -36,7 +36,6 @@ class S3Storage(StorageBackend):
     ) -> None:
         try:
             import boto3
-            from botocore.config import Config
         except ImportError as exc:
             raise ImportError(
                 "boto3 is required for S3Storage. "
@@ -44,32 +43,20 @@ class S3Storage(StorageBackend):
                 "or: pip install -e \".[storage]\""
             ) from exc
 
-        session_kwargs: dict = {}
-        if access_key_id:
-            session_kwargs["aws_access_key_id"] = access_key_id
-        if secret_access_key:
-            session_kwargs["aws_secret_access_key"] = secret_access_key
-        if region:
-            session_kwargs["region_name"] = region
-
+        # Client shape follows Cloudflare's official R2 boto3 example to
+        # minimize compatibility surprises (no custom botocore config needed).
         client_kwargs: dict = {}
         if endpoint_url:
             client_kwargs["endpoint_url"] = endpoint_url
-
-        # Always use SigV4; also force path-style addressing when a custom
-        # endpoint (e.g. Cloudflare R2, MinIO) is configured.  AWS S3 uses
-        # virtual-hosted style by default and deprecated path-style, so we
-        # only enable it when an explicit endpoint_url is provided.
-        s3_cfg: dict = {}
-        if endpoint_url:
-            s3_cfg["addressing_style"] = "path"
-        client_kwargs["config"] = Config(
-            signature_version="s3v4",
-            s3=s3_cfg or None,
-        )
+        if access_key_id:
+            client_kwargs["aws_access_key_id"] = access_key_id
+        if secret_access_key:
+            client_kwargs["aws_secret_access_key"] = secret_access_key
+        if region:
+            client_kwargs["region_name"] = region
 
         self._bucket = bucket
-        self._client = boto3.client("s3", **session_kwargs, **client_kwargs)
+        self._client = boto3.client("s3", **client_kwargs)
 
     # ------------------------------------------------------------------
     # StorageBackend implementation
