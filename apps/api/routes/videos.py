@@ -135,6 +135,9 @@ async def upload_video(
         processing_run_id=run.id,
     )
 
+    # Commit all rows so the worker can find them immediately after dequeue.
+    await db.commit()
+
     # Enqueue the job in Redis.
     await enqueue(job.id, JobType.process_video.value, {"video_id": video.id})
 
@@ -605,6 +608,9 @@ async def reprocess_video(
     )
     db.add(job)
     await db.flush()  # populate job.id
+
+    # Commit all rows so the worker can find them immediately after dequeue.
+    await db.commit()
 
     await enqueue(job.id, JobType.process_video.value, {"video_id": video_id})
 
