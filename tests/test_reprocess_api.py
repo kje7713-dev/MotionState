@@ -89,6 +89,52 @@ async def test_reprocess_returns_404_for_missing_video(app):
 
 
 @pytest.mark.asyncio
+async def test_reprocess_commits_before_enqueue(app):
+    """POST /videos/{id}/reprocess must commit the DB transaction before calling enqueue."""
+    from libs.db import get_db
+    from libs.models import Job, ProcessingRun, Video
+
+    call_order: list[str] = []
+
+    async def override_get_db():
+        session = AsyncMock()
+        fake_video = MagicMock(spec=Video)
+        fake_video.id = 7
+        fake_video.project_id = 1
+
+        def _set_id(obj):
+            if isinstance(obj, ProcessingRun):
+                obj.id = 50
+            elif isinstance(obj, Job):
+                obj.id = 500
+
+        async def _commit():
+            call_order.append("commit")
+
+        session.get = AsyncMock(return_value=fake_video)
+        session.add = MagicMock(side_effect=_set_id)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock(side_effect=_commit)
+        yield session
+
+    app.dependency_overrides[get_db] = override_get_db
+
+    async def _fake_enqueue(*args, **kwargs):
+        call_order.append("enqueue")
+
+    with patch("apps.api.routes.videos.enqueue", side_effect=_fake_enqueue):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+            response = await c.post("/videos/7/reprocess")
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert call_order.index("commit") < call_order.index("enqueue"), (
+        "DB commit must happen before enqueue; got order: " + str(call_order)
+    )
+
+
+@pytest.mark.asyncio
 async def test_reprocess_enqueues_a_new_job(app):
     """POST /videos/{id}/reprocess enqueues a new process_video job."""
     from libs.db import get_db

@@ -236,6 +236,57 @@ async def test_upload_video_response_includes_processing_run_id(app, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_upload_video_commits_before_enqueue(app, tmp_path):
+    """POST /videos must commit the DB transaction before calling enqueue."""
+    from libs.config import settings
+    from libs.db import get_db
+
+    call_order: list[str] = []
+
+    async def _get_db():
+        from libs.models import Job, Video
+
+        def _set_id(obj):
+            if isinstance(obj, Video):
+                obj.id = 20
+            elif isinstance(obj, Job):
+                obj.id = 30
+
+        session = AsyncMock()
+        session.add = MagicMock(side_effect=_set_id)
+        session.flush = AsyncMock()
+
+        async def _commit():
+            call_order.append("commit")
+
+        session.commit = AsyncMock(side_effect=_commit)
+        yield session
+
+    app.dependency_overrides[get_db] = _get_db
+
+    async def _fake_enqueue(*args, **kwargs):
+        call_order.append("enqueue")
+
+    with (
+        patch.object(settings, "storage_backend", "local"),
+        patch.object(settings, "upload_dir", str(tmp_path / "uploads")),
+        patch("apps.api.routes.videos.enqueue", side_effect=_fake_enqueue),
+    ):
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            response = await client.post(
+                "/videos",
+                files={"file": ("test.mp4", io.BytesIO(b"bytes"), "video/mp4")},
+            )
+
+    app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert call_order.index("commit") < call_order.index("enqueue"), (
+        "DB commit must happen before enqueue; got order: " + str(call_order)
+    )
+
+
+@pytest.mark.asyncio
 async def test_get_video_not_found(app):
     """GET /videos/{id} returns 404 for a missing video."""
     from libs.db import get_db
