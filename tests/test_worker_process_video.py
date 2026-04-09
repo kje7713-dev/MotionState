@@ -6,6 +6,15 @@ import pytest
 
 from libs.models import Artifact, JobStatus, VideoStatus
 
+# Minimal valid StreamInfo to satisfy the pre-normalization probe in the worker.
+_VALID_SRC_INFO = {
+    "has_video": True,
+    "has_audio": True,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "container_format": "mov,mp4,m4a,3gp,3g2,mj2",
+}
+
 
 def _make_fake_state(video_id: str = "1") -> dict:
     return {
