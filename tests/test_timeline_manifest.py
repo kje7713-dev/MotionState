@@ -147,6 +147,7 @@ async def test_timeline_manifest_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -183,6 +184,7 @@ async def test_timeline_manifest_has_required_top_level_keys(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -226,6 +228,7 @@ async def test_timeline_manifest_artifacts_section_references_all_json_files(tmp
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -270,6 +273,7 @@ async def test_timeline_manifest_timeline_has_one_entry_per_clip(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -310,6 +314,7 @@ async def test_timeline_entry_has_required_fields(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -360,6 +365,7 @@ async def test_state_json_includes_clip_summary(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -398,6 +404,7 @@ async def test_state_json_includes_manifest_path(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -441,6 +448,7 @@ async def test_clip_artifact_rows_are_persisted(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -478,6 +486,7 @@ async def test_clip_artifact_metadata_includes_required_fields(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -518,6 +527,7 @@ async def test_timeline_manifest_artifact_row_is_persisted(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},

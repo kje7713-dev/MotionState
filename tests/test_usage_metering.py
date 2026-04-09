@@ -383,6 +383,7 @@ async def test_process_video_emits_storage_bytes(tmp_path):
         patch("libs.db.AsyncSessionLocal", return_value=ctx_manager),
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=ctx_manager),
         patch("apps.worker.jobs.process_video.normalize_video", return_value=None),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch("apps.worker.jobs.process_video.probe_video", return_value=fake_meta),
         patch("apps.worker.jobs.process_video.extract_frames", return_value=["f1", "f2", "f3"]),
         patch("apps.worker.jobs.process_video.run_pipeline", return_value=(
