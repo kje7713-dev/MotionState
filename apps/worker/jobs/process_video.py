@@ -17,6 +17,7 @@ Steps:
 
 import json
 import logging
+import subprocess
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -38,7 +39,12 @@ from libs.pipeline.run_pipeline import run_pipeline
 from libs.storage import artifact_key, get_storage, normalized_video_key
 from libs.usage import emit as emit_usage
 from libs.video.clips import generate_clips
-from libs.video.ffmpeg import normalize_video, probe_video
+from libs.video.ffmpeg import (
+    NormalizationError,
+    normalize_video,
+    probe_media_streams,
+    probe_video,
+)
 from libs.video.frames import extract_frames
 from libs.webhooks import enqueue_run_event
 
@@ -190,12 +196,51 @@ async def handle_process_video(message: dict) -> None:
                     raise FileNotFoundError(f"Source video not found: {source}")
                 local_source = source
 
+            # --- Inspect source media (independent of filename/extension) ---
+            # Probe the actual file content so we can validate the input and
+            # log useful debug info before committing to a potentially expensive
+            # encode.  ffprobe reads the container/stream metadata directly;
+            # the file extension is irrelevant here.
+            try:
+                src_info = probe_media_streams(local_source)
+            except subprocess.CalledProcessError as probe_exc:
+                stderr_snip = (probe_exc.stderr or "").strip()[-500:]
+                raise ValueError(
+                    f"Cannot probe source file (ffprobe exit {probe_exc.returncode})"
+                    + (f": {stderr_snip}" if stderr_snip else "")
+                ) from probe_exc
+
+            logger.info(
+                "Source media: container=%r video_codec=%r has_audio=%s",
+                src_info["container_format"],
+                src_info["video_codec"],
+                src_info["has_audio"],
+            )
+
+            if not src_info["has_video"]:
+                raise ValueError(
+                    "Source file contains no video stream "
+                    f"(container: {src_info['container_format']!r})"
+                )
+
             # --- Normalize ---
             norm_dir = Path(settings.normalized_dir)
             norm_dir.mkdir(parents=True, exist_ok=True)
             norm_path = norm_dir / f"{video_id}_normalized.mp4"
             try:
                 normalize_video(local_source, str(norm_path))
+            except NormalizationError as exc:
+                # Log the full stderr separately at DEBUG level so it is
+                # available in verbose logs without polluting the job error field
+                # (the exception message already carries a trimmed excerpt).
+                if exc.stderr:
+                    logger.debug(
+                        "ffmpeg full stderr for video %d (returncode=%d):\n%s",
+                        video_id,
+                        exc.returncode,
+                        exc.stderr,
+                    )
+                raise
             finally:
                 # Remove the temporary source file (S3 download) now that
                 # normalization has finished (whether it succeeded or not).

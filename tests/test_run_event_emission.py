@@ -18,6 +18,16 @@ import pytest
 from libs.events import RunEventType
 from libs.models import ProcessingRun, RunStatus
 
+# Minimal valid StreamInfo to satisfy the pre-normalization probe in the worker.
+_VALID_SRC_INFO = {
+    "has_video": True,
+    "has_audio": True,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "container_format": "mov,mp4,m4a,3gp,3g2,mj2",
+}
+
+
 # ---------------------------------------------------------------------------
 # Helpers shared with test_processing_runs.py
 # ---------------------------------------------------------------------------
@@ -147,6 +157,7 @@ async def test_worker_emits_running_event(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -188,6 +199,7 @@ async def test_worker_emits_completed_event(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -229,6 +241,7 @@ async def test_worker_completed_event_includes_artifact_types(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -274,6 +287,7 @@ async def test_worker_emits_failed_event_with_error(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -314,6 +328,7 @@ async def test_worker_failed_event_not_emit_completed(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -349,6 +364,7 @@ async def test_worker_running_event_has_correct_project_id(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},

@@ -6,6 +6,15 @@ import pytest
 
 from libs.models import Artifact, JobStatus, VideoStatus
 
+# Minimal valid StreamInfo to satisfy the pre-normalization probe in the worker.
+_VALID_SRC_INFO = {
+    "has_video": True,
+    "has_audio": True,
+    "video_codec": "h264",
+    "audio_codec": "aac",
+    "container_format": "mov,mp4,m4a,3gp,3g2,mj2",
+}
+
 
 def _make_fake_state(video_id: str = "1") -> dict:
     return {
@@ -166,6 +175,7 @@ async def test_state_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -202,6 +212,7 @@ async def test_detections_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -235,6 +246,7 @@ async def test_tracks_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -271,6 +283,7 @@ async def test_poses_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -307,6 +320,7 @@ async def test_features_json_is_written(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -348,6 +362,7 @@ async def test_three_artifact_rows_are_added(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -384,6 +399,7 @@ async def test_artifact_types_include_tracks(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -426,6 +442,7 @@ async def test_job_status_transitions_to_done_on_success(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -460,6 +477,7 @@ async def test_video_status_transitions_to_ready_on_success(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -495,6 +513,7 @@ async def test_job_status_transitions_to_error_on_failure(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
@@ -524,6 +543,7 @@ async def test_video_status_transitions_to_error_on_failure(tmp_path):
     with (
         patch("apps.worker.jobs.process_video.AsyncSessionLocal", return_value=mock_db),
         patch("apps.worker.jobs.process_video.normalize_video"),
+        patch("apps.worker.jobs.process_video.probe_media_streams", return_value=_VALID_SRC_INFO),
         patch(
             "apps.worker.jobs.process_video.probe_video",
             return_value={"duration_seconds": 5.0, "fps": 30.0, "width": 1280, "height": 720},
